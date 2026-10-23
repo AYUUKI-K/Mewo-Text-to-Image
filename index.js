@@ -9,7 +9,7 @@ import * as wi from '../../../world-info.js';
 import { getScriptsByType, saveScriptsByType, SCRIPT_TYPES } from '../../regex/engine.js';
 import { createSettingsPanel } from './ui.js';
 import {createDirectClient} from './direct-client.js';
-import {createKeyVault} from './direct-key.js';
+import {createKeyVault,saveCurrentKey} from './direct-key.js';
 import {appendImageVersion,imageVersions,selectImageVersion} from './image-history.js';
 import {selectVibes} from './vibe.js';
 import {createExtensionUpdater} from './updates.js';
@@ -314,13 +314,13 @@ async function openSettings() {
             if(action==='confirm-delete')return Boolean(await showPopup('删除当前配置？',POPUP_TYPE.CONFIRM));
             renderAll();if(action===true)autoLatest();
         },
-        saveKey:async key=>{if(!key)throw new Error('请填写 Key');const hash=await fingerprintKey(key);await writeSecret(SECRET_KEYS.NOVEL,key);settings.keyHash=hash;save();await directVault.set(key,settings.rememberDirectKey);toastr.success('NAI Key 已保存，Vibe 可直接使用');},
+        saveKey:async input=>{await saveCurrentKey({input,vault:directVault,settings,writeServerKey:key=>writeSecret(SECRET_KEYS.NOVEL,key),fingerprint:fingerprintKey,save});toastr.success(settings.rememberDirectKey?'NAI Key 已保存到酒馆和当前设备，刷新后可继续使用':'NAI Key 已保存，直连 Key 仅在当前页面暂存');},
         testImage,installDefaults,installWorld,installRegex,listImages,deleteImages,changeFolder,saveCapture,queueStatus,openImage,downloadImages,
         checkUpdate:force=>updater.check(force),installUpdate:()=>updater.install(),refreshPage:()=>{if(streamActive||running.size)throw Error('请等当前回复和生图完成后再刷新');location.reload();},
         listVibes:()=>direct.list(),importVibeFile,
-        directKeyStatus:async()=>{const key=await directVault.get();return Boolean(key&&settings.keyHash&&await fingerprintKey(key)===settings.keyHash);},clearDirectKey:()=>directVault.clear(),
+        directKeyStatus:async()=>{const status=await directVault.status(),key=await directVault.get();return {...status,ready:Boolean(key&&settings.keyHash&&await fingerprintKey(key)===settings.keyHash),serverSaved:!!settings.keyHash};},clearDirectKey:()=>directVault.clear(),
         closeSettings:()=>settingsPopup?.completeAffirmative?settingsPopup.completeAffirmative():settingsPopup?.dlg.close(),
-        setRememberDirectKey:async value=>{settings.rememberDirectKey=value;save();if(!value)await directVault.forgetPersistent();},
+        setRememberDirectKey:async value=>{await directVault.remember(value);settings.rememberDirectKey=value;save();},
         encodeVibe:async body=>{const generate=()=>direct.encode(body);return settings.cloudQueue?runWithQueue({url:settings.queueUrl,keyHash:settings.keyHash,generate}):generate();},renameVibe:body=>direct.rename(body),
         deleteVibe:async id=>{if(!await showPopup('删除这个 Vibe？所有配置中的引用也会移除。',POPUP_TYPE.CONFIRM))return false;await direct.delete(id);for(const p of settings.profiles)p.vibes=(p.vibes||[]).filter(v=>v.id!==id);save();return true;}});
     settingsHost=panel;

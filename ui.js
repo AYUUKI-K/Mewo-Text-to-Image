@@ -88,16 +88,16 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
             const main=section(body,'生成方式','自动生成只处理最新楼层；旧楼层随时可以手动点击。');
             const toggle=node('label',undefined,'miao-switch-row');const checkbox=node('input');checkbox.type='checkbox';checkbox.checked=settings.enabled;checkbox.onchange=()=>{settings.enabled=checkbox.checked;save();onChange();};toggle.append(node('span','启用文生图'),checkbox);main.append(toggle);
             field(main,'最新楼层',settings.mode,v=>{settings.mode=v;save();onChange(true);render();},{options:[['manual','手动 · 点击按钮后生成'],['auto','自动 · 载入或回复完成后生成'],['stream','流式 · 完整标签出现后生成']]});
-            const connection=section(body,'连接 NovelAI','普通生图使用酒馆密钥；Vibe 从当前设备直连 NAI。首次使用 Vibe 请在这里重新填一次 Key。');
+            const connection=section(body,'连接 NovelAI','普通生图使用酒馆端 Key；Vibe 使用当前设备的直连 Key。记住后，更新或刷新会自动恢复。');
             const key=field(connection,'API Key','',()=>{},{type:'password'});key.autocomplete='new-password';key.placeholder='输入你的 NovelAI Key';
-            const remember=node('label',undefined,'miao-switch-row'),rememberCheck=node('input');rememberCheck.type='checkbox';rememberCheck.checked=!!settings.rememberDirectKey;rememberCheck.onchange=safe(()=>setRememberDirectKey(rememberCheck.checked));remember.append(node('span','在此设备记住 Vibe 直连 Key'),rememberCheck);connection.append(remember);
-            connection.append(node('p','默认只在当前页面暂存。勾选后再保存，Key 才会存入当前浏览器；不会进入插件配置或 Vibe 文件。','miao-muted'));
+            const remember=node('label',undefined,'miao-switch-row'),rememberCheck=node('input');rememberCheck.type='checkbox';rememberCheck.checked=!!settings.rememberDirectKey;rememberCheck.onchange=safe(async()=>{try{await setRememberDirectKey(rememberCheck.checked);}finally{rememberCheck.checked=!!settings.rememberDirectKey;await updateKeyState();}});remember.append(node('span','在此设备记住 Vibe 直连 Key'),rememberCheck);connection.append(remember);
+            connection.append(node('p','勾选后立即记住本页已保存的 Key，更新或刷新后仍可使用。新输入的 Key 请点保存；Key 不会进入插件配置或 Vibe 文件。','miao-muted'));
             const keyState=node('p','正在检查直连 Key…','miao-muted');connection.append(keyState);
-            const mask='••••••••••••';
+            const mask='••••••••••••';let directReady=false;
             key.addEventListener('focus',()=>{if(key.value===mask)key.value='';});
-            key.addEventListener('blur',()=>{if(!key.value&&settings.keyHash)key.value=mask;});
-            const updateKeyState=async()=>{const directReady=await directKeyStatus();keyState.textContent=settings.keyHash?(directReady?'✓ Key 已保存 · 当前设备可使用 Vibe':'✓ 酒馆 Key 已保存 · Vibe 请在此设备重新填写'):'尚未保存 Key';if(settings.keyHash&&document.activeElement!==key&&(!key.value||key.value===mask))key.value=mask;};safe(updateKeyState)();
-            const actions=node('div',undefined,'miao-actions');connection.append(actions);action(actions,'保存密钥',async()=>{if(key.value&&key.value!==mask)await saveKey(key.value.trim());else if(!settings.keyHash)throw Error('请填写 Key');key.value='';await updateKeyState();},true);action(actions,'测试生成',testImage);
+            key.addEventListener('blur',()=>{if(!key.value&&directReady)key.value=mask;});
+            const updateKeyState=async()=>{const status=await directKeyStatus();directReady=status.ready;keyState.textContent=directReady?(status.persistent?'✓ Key 已保存到当前设备，更新或刷新后可继续使用':'✓ Key 仅在当前页面暂存，刷新后需重填'):status.serverSaved?'酒馆端 Key 已保存；当前设备没有可用的 Vibe Key，请补填一次并保存。':'尚未保存 Key';if(document.activeElement!==key&&(!key.value||key.value===mask))key.value=directReady?mask:'';};safe(updateKeyState)();
+            const actions=node('div',undefined,'miao-actions');connection.append(actions);action(actions,'保存密钥',async()=>{try{await saveKey(key.value===mask?'':key.value.trim());key.value='';}finally{await updateKeyState();}},true);action(actions,'测试生成',testImage);
             action(connection,'清除本设备直连 Key',async()=>{await clearDirectKey();await updateKeyState();});
             const queue=section(body,'共享 Key 排队','同一个 Key 轮流生成，不同 Key 各走各的队列。');
             const queueToggle=node('label',undefined,'miao-switch-row'),queueCheck=node('input');queueCheck.type='checkbox';queueCheck.checked=settings.cloudQueue;queueCheck.onchange=()=>{settings.cloudQueue=queueCheck.checked;save();};queueToggle.append(node('span','启用云端排队'),queueCheck);queue.append(queueToggle);
@@ -235,7 +235,7 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
             action(controls,'清理选中日期',async()=>{if(!selected.size)throw new Error('请先勾选需要清理的日期');await deleteImages(selectedFolder,images.filter(i=>selected.has(i.day)).map(i=>i.name));await refresh();});
             refresh();
         }
-        const footer=node('footer',undefined,'miao-footer');footer.append(node('span','by 喵喵电波-NUE','miao-credit'),node('span','喵喵文生图 · 0.5.6'),updateBox);root.append(footer);
+        const footer=node('footer',undefined,'miao-footer');footer.append(node('span','by 喵喵电波-NUE','miao-credit'),node('span','喵喵文生图 · 0.5.7'),updateBox);root.append(footer);
     }
     render();checkLatest(false);return root;
 }

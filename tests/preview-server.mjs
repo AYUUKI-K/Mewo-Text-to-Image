@@ -15,7 +15,8 @@ function fixtureZip(){
 const mock=`import {defaults} from '${prefix}core.js';
 const handlers=new Map();const chat=Array.from({length:6},(_,i)=>({name:'Preview',mes:i===3?'image###third###':i===5?'<star_cot>image###fifth### image###wrong###</star_cot>image###fifth###':'Floor '+i,extra:{}}));
 export const extension_settings={miao_nai_image:{enabled:true,mode:'manual',theme:'light',folder:'miao-nai',folders:['miao-nai'],pattern:'image###([\\\\s\\\\S]*?)###',profiles:[{...defaults,name:'A',positive:'a style',steps:20},{...defaults,name:'B',positive:'b style',steps:28}],active:0,installed:true,vibeLibrary:[{id:'00000000-0000-0000-0000-000000000001',name:'测试氛围',hasImage:false,variants:[{model:'v4-5full',key:'hash',information:0.7}]}]}};
-const context={chat,powerUserSettings:{reasoning:{prefix:'<star_cot>',suffix:'</star_cot>'}},getCurrentChatId:()=>window.preview.chatId,getRequestHeaders:()=>({'Content-Type':'application/json'}),saveSettingsDebounced(){},async saveChat(){},eventTypes:Object.fromEntries(['CHAT_CHANGED','GENERATION_STARTED','GENERATION_ENDED','STREAM_TOKEN_RECEIVED','CHARACTER_MESSAGE_RENDERED','MESSAGE_UPDATED','MESSAGE_SWIPED','MESSAGE_EDITED'].map(x=>[x,x])),eventSource:{on(n,fn){if(!handlers.has(n))handlers.set(n,[]);handlers.get(n).push(fn);}}};
+if(new URL(location.href).searchParams.has('key-reload'))Object.assign(extension_settings.miao_nai_image,JSON.parse(sessionStorage.getItem('miao-preview-key-state')||'{}'));
+const context={chat,powerUserSettings:{reasoning:{prefix:'<star_cot>',suffix:'</star_cot>'}},getCurrentChatId:()=>window.preview.chatId,getRequestHeaders:()=>({'Content-Type':'application/json'}),saveSettingsDebounced(){const s=extension_settings.miao_nai_image;sessionStorage.setItem('miao-preview-key-state',JSON.stringify({keyHash:s.keyHash,rememberDirectKey:s.rememberDirectKey}));},async saveChat(){},eventTypes:Object.fromEntries(['CHAT_CHANGED','GENERATION_STARTED','GENERATION_ENDED','STREAM_TOKEN_RECEIVED','CHARACTER_MESSAGE_RENDERED','MESSAGE_UPDATED','MESSAGE_SWIPED','MESSAGE_EDITED'].map(x=>[x,x])),eventSource:{on(n,fn){if(!handlers.has(n))handlers.set(n,[]);handlers.get(n).push(fn);}}};
 window.preview={chat,chatId:'preview',settings:extension_settings.miao_nai_image,async emit(n){for(const fn of handlers.get(n)||[])await fn();},calls:[],translations:[],files:[...Array.from({length:53},(_,i)=>'miao-'+(1792737847709-i*3600000)+'.png'),'unrelated.png']};
 export const getContext=()=>context;
 `;
@@ -36,7 +37,7 @@ if(url==='https://image.novelai.net/ai/encode-vibe')return new Response(new Uint
 return previousFetch(url,options);};
 await import('${prefix}index.js');const wait=()=>new Promise(r=>setTimeout(r,180));await wait();
 const results=[];const check=(condition,label)=>{results.push((condition?'PASS ':'FAIL ')+label);if(!condition)throw Error(label);};
-try{
+if(!new URL(location.href).searchParams.has('key-reload'))try{
 check(document.querySelectorAll('.miao-image-card').length===2,'#3 与 #5 都显示按钮');check(p.calls.length===0,'手动模式载入零请求');
 p.settings.mode='auto';await p.emit('CHAT_CHANGED');await p.emit('CHARACTER_MESSAGE_RENDERED');await wait();check(p.calls.length===1&&p.calls[0].prompt.includes('fifth'),'载入自动模式只生成 #5，渲染事件不覆盖载入事件');
 await p.emit('CHAT_CHANGED');await wait();check(p.calls.length===1,'重复载入不重复生成');
@@ -73,19 +74,29 @@ const nativeAnchorClick=HTMLAnchorElement.prototype.click,nativeObjectURL=URL.cr
 document.querySelector('.miao-history-selection button').click();await new Promise(r=>setTimeout(r,500));HTMLAnchorElement.prototype.click=nativeAnchorClick;URL.createObjectURL=nativeObjectURL;
 const archive=await JSZip.loadAsync(await blobs[0].arrayBuffer());check(downloads[0]==='miao-images-2.zip'&&Object.keys(archive.files).length===2&&archive.files[firstName]&&archive.files[secondName]&&!document.querySelector('.miao-history-download'),'勾选两张下载一个 ZIP，保留原名，缩略图不再显示下载按钮');
 document.querySelectorAll('.miao-history-selection button')[1].click();await wait();check(!p.files.includes(firstName)&&!p.files.includes(secondName)&&p.files.length===52&&p.files.includes('unrelated.png'),'勾选删除只清理选中两张，不影响同日其他图或无关文件');
+document.querySelector('.miao-drawer-back').click();document.querySelector('.miao-overview-row[aria-label="生成"]').click();await wait();
+const keyField=document.querySelector('input[type=password]');const rememberToggle=[...document.querySelectorAll('.miao-switch-row')].find(label=>label.textContent.includes('在此设备记住')).querySelector('input');
+const keySave=[...document.querySelectorAll('.miao-button')].find(button=>button.textContent==='保存密钥');keyField.value='fixture-browser-key-not-real';keySave.click();await wait();check(document.querySelector('.miao-panel-body').textContent.includes('Key 仅在当前页面暂存'),'保存未勾选 Key 时明确显示仅页面暂存');
+rememberToggle.click();await wait();check(document.querySelector('.miao-panel-body').textContent.includes('Key 已保存到当前设备'),'先保存再勾选记住，立即持久化当前 Key');
+const writes=p.secretWrites;keySave.click();await wait();check(p.secretWrites===writes+1,'遮罩状态再次保存会保存真实 Key，而非静默跳过');
 }catch(error){results.push(error.stack);}document.getElementById('report').textContent=results.join('\\n');
 if(!document.querySelector('.miao-settings'))document.getElementById('miao-nai-menu').click();
+if(new URL(location.href).searchParams.has('key-reload')){
+await wait();if(document.querySelector('.miao-overview-row[aria-label="生成"]'))document.querySelector('.miao-overview-row[aria-label="生成"]').click();await wait();
+check(document.querySelector('.miao-panel-body').textContent.includes('Key 已保存到当前设备'),'真实页面重新加载后，从 IndexedDB 恢复记住的 Key');
+check(document.querySelector('input[type=password]').value.length>0,'仅当直连 Key 实际可用时显示遮罩');document.getElementById('report').textContent=results.join(String.fromCharCode(10));
+}
 </script>`;
 const server=http.createServer(async(req,res)=>{try{
 let body,type='text/javascript';
-if(req.url==='/'||req.url?.startsWith('/?theme=')){
+if(req.url==='/'||req.url?.startsWith('/?')){
 const dark=new URL(req.url,'http://localhost').searchParams.get('theme')==='dark';
 const hostTheme=dark?'--SmartThemeBodyColor:#e5ebf5;--SmartThemeBlurTintColor:#121b2b;--SmartThemeQuoteColor:#83b7ff;--SmartThemeBorderColor:#35435b':'--SmartThemeBodyColor:#26364c;--SmartThemeBlurTintColor:#f8fbff;--SmartThemeQuoteColor:#3779c5;--SmartThemeBorderColor:#cedbea';
 body=html.replace('<style>','<style>:root{'+hostTheme+'}');type='text/html';}
 else if(req.url==='/scripts/extensions.js')body=mock;
 else if(req.url==='/scripts/popup.js')body=popup;
 else if(req.url==='/scripts/utils.js')body=`let saved=1892737847709;export async function saveBase64AsFile(){return '/user/images/miao-nai/miao-'+(saved++)+'.png';}`;
-else if(req.url==='/scripts/secrets.js')body=`export const SECRET_KEYS={NOVEL:'novel'};export async function writeSecret(){}`;
+else if(req.url==='/scripts/secrets.js')body=`export const SECRET_KEYS={NOVEL:'novel'};export async function writeSecret(){window.preview.secretWrites=(window.preview.secretWrites||0)+1;return 'fixture-id';}`;
 else if(req.url==='/scripts/user.js')body=`export const getCurrentUserHandle=()=>'miao-preview-user';`;
 else if(req.url==='/lib/jszip.min.js'&&process.env.MIAO_ST_ROOT)body=await readFile(new URL('public/lib/jszip.min.js', 'file:///'+process.env.MIAO_ST_ROOT.replaceAll('\\','/').replace(/\/$/,'')+'/'));
 else if(req.url==='/fixture-nai.zip'){body=fixtureZip();type='application/zip';}
