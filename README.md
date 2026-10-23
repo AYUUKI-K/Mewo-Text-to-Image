@@ -7,7 +7,7 @@ SillyTavern 文生图扩展，仅支持 NovelAI。配合世界书输出提示词
 在酒馆「扩展程序 → 安装扩展程序」粘贴：
 
 ```text
-https://github.com/AYUUKI-K/Miao-Text-to-Image
+https://github.com/AYUUKI-K/Mewo-Text-to-Image
 ```
 
 安装后刷新页面，点击聊天输入框旁的魔棒，在菜单中打开「喵喵文生图」。需要酒馆后端支持 `/api/novelai/generate-image` 和 NovelAI 密钥管理。

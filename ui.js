@@ -95,7 +95,7 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
             const choices=node('div',undefined,'miao-vibe-choices');vibes.append(choices);profileVibes(choices,p);
         } else if(activeTab==='vibes') {
             const manage=section(body,'Vibe 氛围列表','导入 NAI 的 .naiv4vibe / .naiv4vibeBundle，或上传图片后编码。启用哪些 Vibe，请到「配置」页勾选。');
-            const guide=node('a','服务端安装说明');guide.href='https://github.com/AYUUKI-K/Miao-Text-to-Image/blob/main/VIBE.md';guide.target='_blank';guide.rel='noopener';manage.append(guide);
+            const guide=node('a','服务端安装说明');guide.href='https://github.com/AYUUKI-K/Mewo-Text-to-Image/blob/main/VIBE.md';guide.target='_blank';guide.rel='noopener';manage.append(guide);
             const upload=node('input');upload.type='file';upload.accept='.naiv4vibe,.naiv4vibeBundle,.json,image/png,image/jpeg,image/webp';upload.multiple=true;upload.hidden=true;manage.append(upload);
             const actions=node('div',undefined,'miao-actions');manage.append(actions);
             const list=node('div',undefined,'miao-vibe-list');manage.append(list);

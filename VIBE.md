@@ -7,7 +7,7 @@
 在酒馆根目录执行：
 
 ```sh
-git clone https://github.com/AYUUKI-K/Miao-Text-to-Image.git plugins/miao-nai-image
+git clone https://github.com/AYUUKI-K/Mewo-Text-to-Image.git plugins/miao-nai-image
 ```
 
 在该酒馆的 `config.yaml` 中将 `enableServerPlugins` 设为 `true`，重启酒馆。`package.json` 自动加载 `server-plugin/index.mjs`，没有额外 npm 依赖，不修改酒馆源码，不需要在 Cloudflare 放 Key。
