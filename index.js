@@ -44,7 +44,7 @@ const attempted=new Set();
 const cardBindings=new WeakMap();
 let chatObserver,observedChat,imageSaves=0;
 let queue=Promise.resolve(), streamActive=false, timer, autoScheduled=false, generationChat=null, settingsHost=null,imageToolsEpoch=0;
-let settingsPopup=null;
+let settingsPopup=null,autoSession=null;
 const save=()=>ctx().saveSettingsDebounced();
 const directUser=getCurrentUserHandle(),directVault=createKeyVault(directUser);
 const direct=createDirectClient({settings,save,getHeaders:()=>ctx().getRequestHeaders(),getKey:async()=>{
@@ -123,7 +123,7 @@ function generate(message,block,{automatic=false}={}) {
     const waiting=running.size>0||settings.cloudQueue;running.set(taskId,task);renderAll();
     if(waiting)toastr.info('已加入生图队列','喵喵文生图');
     queue=queue.then(async()=>{
-        let target=taskTarget(task);if(!settings.enabled||!target)return;
+        let target=taskTarget(task);if((automatic&&!settings.enabled)||!target)return;
         if(automatic && !canAutoGenerate(ctx().chat,target.message,settings.mode,streamActive))return;
         task.status='正在生图'; renderAll();
         const data=await requestImage(request,task,()=>{const target=taskTarget(task);return !!target&&(!automatic||canAutoGenerate(ctx().chat,target.message,settings.mode,streamActive));});
@@ -268,7 +268,6 @@ function replaceLiteral(root,literal,node,message,block) {
     return true;
 }
 function renderAll() {
-    if(!settings.enabled)return;
     chatObserver?.disconnect();
     try{
     document.querySelectorAll('#chat .mes').forEach(mes=>{
@@ -448,7 +447,7 @@ async function openSettings() {
     const panel=createSettingsPanel({settings,save,theme:resolvedTheme,onTheme:applyTheme,onError:errorPopup,
         onChange:async action=>{
             if(action==='confirm-delete')return Boolean(await showPopup('删除当前配置？',POPUP_TYPE.CONFIRM));
-            renderAll();if(action===true)autoLatest();
+            autoSession=null;renderAll();
         },
         saveKey:async input=>{await saveCurrentKey({input,vault:directVault,settings,writeServerKey:key=>writeSecret(SECRET_KEYS.NOVEL,key),fingerprint:fingerprintKey,save});toastr.success(settings.rememberDirectKey?'NAI Key 已保存到酒馆和当前设备，刷新后可继续使用':'NAI Key 已保存，直连 Key 仅在当前页面暂存');},
         testImage,installDefaults,installWorld,installRegex,listImages,deleteImages,changeFolder,saveCapture,queueStatus,openImage,downloadImages,
@@ -474,12 +473,12 @@ function mountMenu() {
     const menu=document.getElementById('extensionsMenu');if(menu)menu.append(item);
 }
 function autoLatest() {
-    if(!settings.enabled)return;
+    if(!settings.enabled||!autoSession?.enabled||autoSession.chat!==currentChat())return;
     const message=latestImageMessage(ctx().chat);
     if(!message || !canAutoGenerate(ctx().chat,message,settings.mode,streamActive))return;
     for(const block of blocks(message)) {
         const id=`${currentChat()}:${ctx().chat.indexOf(message)}:${identity(message,block)}`;
-        if(!attempted.has(id)&&!state(message,identity(message,block)))generate(message,block,{automatic:true});
+        if(!autoSession.existing.has(`${ctx().chat.indexOf(message)}:${identity(message,block)}`)&&!attempted.has(id)&&!state(message,identity(message,block)))generate(message,block,{automatic:true});
     }
 }
 function scanStream() {
@@ -501,6 +500,7 @@ async function init() {
     for(const name of ['CHARACTER_MESSAGE_RENDERED','MESSAGE_UPDATED','MESSAGE_SWIPED','MESSAGE_EDITED'])if(c.eventTypes[name])c.eventSource.on(c.eventTypes[name],messageId=>{
         // Final rendering and swipe navigation must release any stale stream lock.
         if(name==='MESSAGE_SWIPED'||name==='CHARACTER_MESSAGE_RENDERED'&&Number(messageId)===ctx().chat.length-1){streamActive=false;generationChat=null;}
+        if(name==='CHARACTER_MESSAGE_RENDERED'&&Number(messageId)===ctx().chat.length-1){autoLatest();autoSession=null;}
         scheduleRender(false);
     });
     if(c.eventTypes.MESSAGE_SWIPE_DELETED)c.eventSource.on(c.eventTypes.MESSAGE_SWIPE_DELETED,async({messageId,swipeId})=>{
@@ -508,12 +508,13 @@ async function init() {
         for(const task of running.values())if(liveMessage(task.message,task)===message&&task.swipe>=swipeId)task.cancelled=true;
         removeSwipeImages(message,swipeId);await ctx().saveChat();scheduleRender(false);
     });
-    c.eventSource.on(c.eventTypes.CHAT_CHANGED,()=>{streamActive=false;generationChat=null;scheduleRender(true);});
+    c.eventSource.on(c.eventTypes.CHAT_CHANGED,()=>{streamActive=false;generationChat=null;autoSession=null;scheduleRender(false);});
     c.eventSource.on(c.eventTypes.GENERATION_STARTED,(type,options,dryRun)=>{
         // Quiet prompts and prompt previews do not render a chat reply and may
         // never emit GENERATION_ENDED. They must not hide the last floor's cards.
         if(dryRun||type==='quiet'||type==='impersonate')return;
         streamActive=false;generationChat=currentChat();
+        autoSession={chat:currentChat(),enabled:settings.enabled&&settings.mode!=='manual',existing:new Set(ctx().chat.flatMap((m,i)=>blocks(m).map(b=>`${i}:${identity(m,b)}`)))};
     });
     c.eventSource.on(c.eventTypes.GENERATION_ENDED,()=>{const same=generationChat===currentChat();streamActive=false;generationChat=null;renderAll();if(same)autoLatest();});
     if(c.eventTypes.GENERATION_STOPPED)c.eventSource.on(c.eventTypes.GENERATION_STOPPED,()=>{streamActive=false;generationChat=null;scheduleRender(false);});

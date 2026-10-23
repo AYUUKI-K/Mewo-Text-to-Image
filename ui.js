@@ -11,13 +11,18 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
     let updateData=null,updateBusy=false,updateError='',updated=false;
     function paintUpdate(){
         updateBox.replaceChildren();
-        if(updateBusy){updateBox.append(node('span','正在'+(updateData?.isUpToDate===false?'更新':'检查更新')+'…'));return;}
-        if(updated){updateBox.append(node('span','更新已完成，刷新后生效'));action(updateBox,'强制刷新酒馆',refreshPage);return;}
-        if(updateError){updateBox.append(node('span',updateError));action(updateBox,'重试检查',checkLatest);return;}
-        if(updateData?.isUpToDate===false){updateBox.append(node('span','检测到当前有新版本'));action(updateBox,'立即更新',async()=>{updateBusy=true;paintUpdate();try{await installUpdate();updated=true;}catch(error){updateError=error.message;}finally{updateBusy=false;paintUpdate();}},true);}
-        else{updateBox.append(node('span',updateData?'已是最新版本':'检查插件更新'));action(updateBox,'检查更新',checkLatest);}
+        if(updateBusy){updateBox.append(node('span','正在检查并更新…'));return;}
+        if(updated){updateBox.append(node('span','更新完成，正在刷新…'));return;}
+        if(updateError)updateBox.append(node('span',updateError));
+        else updateBox.append(node('span',updateData?.isUpToDate===false?'检测到当前有新版本':updateData?'已是最新版本':''));
+        action(updateBox,'检查并更新',async()=>{
+            updateBusy=true;updateError='';paintUpdate();
+            try{updateData=await checkUpdate(true);if(updateData.needsReload||updateData.isUpToDate===false){if(!updateData.needsReload)await installUpdate();updated=true;paintUpdate();await refreshPage();}}
+            catch(error){updateError=error.message;updated=false;}
+            finally{updateBusy=false;paintUpdate();}
+        });
     }
-    async function checkLatest(force=true){updateBusy=true;updateError='';paintUpdate();try{updateData=await checkUpdate(force);updated=!!updateData.needsReload;}catch(error){updateError=error.message;}finally{updateBusy=false;paintUpdate();}}
+    async function checkLatest(force=false){updateBusy=true;paintUpdate();try{updateData=await checkUpdate(force);}catch(error){updateError=error.message;}finally{updateBusy=false;paintUpdate();}}
     function action(parent,label,fn,primary=false) {
         const b=node('button',label,`miao-button${primary?' miao-primary':''}`);b.type='button';
         b.onclick=safe(async()=>{if(b.disabled)return;b.disabled=true;try{await fn();}finally{b.disabled=false;}});parent.append(b);return b;
@@ -85,9 +90,9 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
                 row.onclick=()=>{activeTab=id;render();root.closest('.popup-content')?.scrollTo({top:0});};overview.append(row);
             }
         } else if(activeTab==='generation') {
-            const main=section(body,'生成方式','自动生成只处理最新楼层；旧楼层随时可以手动点击。');
-            const toggle=node('label',undefined,'miao-switch-row');const checkbox=node('input');checkbox.type='checkbox';checkbox.checked=settings.enabled;checkbox.onchange=()=>{settings.enabled=checkbox.checked;save();onChange();};toggle.append(node('span','启用文生图'),checkbox);main.append(toggle);
-            field(main,'最新楼层',settings.mode,v=>{settings.mode=v;save();onChange(true);render();},{options:[['manual','手动 · 点击按钮后生成'],['auto','自动 · 载入或回复完成后生成'],['stream','流式 · 完整标签出现后生成']]});
+            const main=section(body,'生成方式','自动生图仅处理开启期间的新回复；旧标签可手动生成。');
+            const toggle=node('label',undefined,'miao-switch-row');const checkbox=node('input');checkbox.type='checkbox';checkbox.checked=settings.enabled;checkbox.onchange=()=>{settings.enabled=checkbox.checked;save();onChange();};toggle.append(node('span','启用自动生图'),checkbox);main.append(toggle);
+            field(main,'最新楼层',settings.mode,v=>{settings.mode=v;save();onChange(true);render();},{options:[['manual','手动 · 点击按钮后生成'],['auto','自动 · 新回复完成后生成'],['stream','流式 · 完整标签出现后生成']]});
             const connection=section(body,'连接 NovelAI');
             const key=field(connection,'API Key','',()=>{},{type:'password'});key.autocomplete='new-password';key.placeholder='输入你的 NovelAI Key';
             const remember=node('label',undefined,'miao-switch-row'),rememberCheck=node('input');rememberCheck.type='checkbox';rememberCheck.checked=!!settings.rememberDirectKey;rememberCheck.onchange=safe(async()=>{try{await setRememberDirectKey(rememberCheck.checked);}finally{rememberCheck.checked=!!settings.rememberDirectKey;await updateKeyState();}});remember.append(node('span','在此设备记住 Vibe 直连 Key'),rememberCheck);connection.append(remember);
@@ -235,7 +240,7 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
             action(controls,'清理选中日期',async()=>{if(!selected.size)throw new Error('请先勾选需要清理的日期');await deleteImages(selectedFolder,images.filter(i=>selected.has(i.day)).map(i=>i.name));await refresh();});
             refresh();
         }
-        const footer=node('footer',undefined,'miao-footer');footer.append(node('span','by 喵喵电波-NUE','miao-credit'),node('span','喵喵文生图 · 1.0.0'),updateBox);root.append(footer);
+        const footer=node('footer',undefined,'miao-footer');footer.append(node('span','by 喵喵电波-NUE','miao-credit'),node('span','喵喵文生图 · 1.0.1'),updateBox);root.append(footer);
     }
     render();checkLatest(false);return root;
 }
