@@ -29,3 +29,9 @@ test('empty or failed selection produces no download',async()=>{
     await assert.rejects(downloadImageSelection([],options),/勾选/);
     await assert.rejects(downloadImageSelection([{name:'missing.png',url:'/missing'}],options),/missing.png.*404/);assert.equal(saves,0);
 });
+
+test('native export cancellation stops the remaining selected downloads',async()=>{
+    const requests=[];await downloadImageSelection([{name:'a.png',url:'/a'},{name:'b.png',url:'/b'}],{
+        fetchImpl:async url=>{requests.push(url);return new Response('png');},saveBlob:async()=>({delivered:false})});
+    assert.deepEqual(requests,['/a']);
+});

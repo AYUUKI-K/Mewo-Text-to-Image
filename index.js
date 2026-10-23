@@ -2,6 +2,8 @@ import {fingerprintKey,runWithQueue,validateQueueURL} from './cloud-queue.js';
 import { getContext, extension_settings } from '../../../extensions.js';
 import * as extensionAPI from '../../../extensions.js';
 import { saveBase64AsFile } from '../../../utils.js';
+import * as hostUtils from '../../../utils.js';
+import {bindImageGesture,createFloatingEntry} from './interactions.js';
 import { writeSecret, SECRET_KEYS } from '../../../secrets.js';
 import { getCurrentUserHandle } from '../../../user.js';
 import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
@@ -17,6 +19,8 @@ import {downloadImageSelection} from './downloads.js';
 import {migrateSwipeImages,readSwipeImage,writeSwipeImage,swipeImageRecords,removeSwipeImages} from './swipe-history.js';
 import { defaults, parseBodyBlocks, maskReasoning, renderedBlockRange, buildRequest, latestImageMessage, canAutoGenerate, validateFolder, imageDay, imageURL, normalizeProfile, delimiterPattern } from './core.js';
 
+await (window.__TAURITAVERN__?.ready??window.__TAURITAVERN_MAIN_READY__);
+const isTT=()=>Boolean(window.__TAURITAVERN__);
 const ID='miao_nai_image';
 const base=new URL('.',import.meta.url);
 const ctx=()=>getContext();
@@ -44,7 +48,7 @@ const attempted=new Set();
 const cardBindings=new WeakMap();
 let chatObserver,observedChat,imageSaves=0;
 let queue=Promise.resolve(), streamActive=false, timer, autoScheduled=false, generationChat=null, settingsHost=null,imageToolsEpoch=0;
-let settingsPopup=null,autoSession=null;
+let settingsPopup=null,autoSession=null,floatingDispose=()=>{},lastGestureReroll=0;
 const save=()=>ctx().saveSettingsDebounced();
 const directUser=getCurrentUserHandle(),directVault=createKeyVault(directUser);
 const direct=createDirectClient({settings,save,getHeaders:()=>ctx().getRequestHeaders(),getKey:async()=>{
@@ -158,12 +162,14 @@ function makeCard(message,block) {
     const actions=el('div',undefined,'miao-image-tools');actions.hidden=true;
     const button=(label,fn,parent=actions)=>{const b=el('button',label,'miao-button');b.type='button';b.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();guard(fn)();});parent.append(b);return b;};
     if(current?.url&&!current.deleted){
-        const image=el('img');image.src=current.url;image.alt='生成的剧情插图';image.loading='lazy';image.tabIndex=0;image.setAttribute('role','button');image.setAttribute('aria-label','单击图片显示选项，双击重新生成');
-        let clickTimer,lastTap=0;
-        const reroll=()=>{clearTimeout(clickTimer);actions.hidden=true;if(!task)guard(()=>generate(message,block))();};
-        image.addEventListener('click',event=>{if(event.detail>1)return;clearTimeout(clickTimer);const epoch=imageToolsEpoch;clickTimer=setTimeout(()=>{if(epoch===imageToolsEpoch)actions.hidden=!actions.hidden;},280);});
-        image.addEventListener('dblclick',event=>{event.preventDefault();reroll();});
-        image.addEventListener('touchend',event=>{const now=Date.now();if(now-lastTap<300){event.preventDefault();reroll();lastTap=0;}else lastTap=now;},{passive:false});
+        const image=el('img');image.src=current.url;image.alt='生成的剧情插图';image.loading='lazy';image.draggable=false;image.tabIndex=0;image.setAttribute('role','button');image.setAttribute('aria-label','单击图片显示选项，双击重新生成');
+        image.setAttribute('aria-label',`单击图片显示选项，${settings.rerollClicks===3?'三':'双'}击重新生成`);
+        const cancelGesture=bindImageGesture(image,{getClicks:()=>settings.rerollClicks===3?3:2,
+            onSingle:()=>{if(image.isConnected&&image.dataset.toolsEpoch===String(imageToolsEpoch))actions.hidden=!actions.hidden;},
+            onReroll:()=>{const now=Date.now();if(task||now-lastGestureReroll<900)return;lastGestureReroll=now;actions.hidden=true;guard(()=>generate(message,block))();}});
+        image.addEventListener('pointerdown',()=>{image.dataset.toolsEpoch=String(imageToolsEpoch);});
+        image.addEventListener('click',()=>{image.dataset.toolsEpoch??=String(imageToolsEpoch);});
+        card._cancelGesture=cancelGesture;
         image.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();actions.hidden=!actions.hidden;}});
         card.append(image);
         if(versions.length>1){
@@ -189,7 +195,7 @@ function makeCard(message,block) {
         actions.hidden=false;button(task?.status||'生成插图',()=>generate(message,block)).disabled=!!task;button('查看提示词',()=>showPrompt(block.prompt));
     }
     if(task){const progress=el('span',task.status,'miao-image-progress');progress.setAttribute('role','status');card.append(progress);}
-    card.dataset.status=String(selected)+':'+versions.map(v=>v.url+':'+!!v.deleted).join('|')+':'+(task?.status||'');
+    card.dataset.status=String(selected)+':'+versions.map(v=>v.url+':'+!!v.deleted).join('|')+':'+(task?.status||'')+':'+(settings.rerollClicks===3?3:2);
     card.append(actions);
     cardBindings.set(card,{message,controls:[...card.querySelectorAll('img,button')]});
     return card;
@@ -343,9 +349,10 @@ function saveCapture(start,end) {
 }
 async function downloadImage(url,name='miao-image.png') {
     const response=await fetch(url);if(!response.ok)throw new Error(`图片下载失败：HTTP ${response.status}`);
-    saveDownload(await response.blob(),name);
+    return saveDownload(await response.blob(),name);
 }
-function saveDownload(blob,name){
+async function saveDownload(blob,name){
+    if(isTT()&&typeof hostUtils.download==='function')return hostUtils.download(blob,name,blob.type,{throwOnFailure:true});
     const objectURL=URL.createObjectURL(blob);
     const link=el('a');link.href=objectURL;link.download=name;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(objectURL),60000);
 }
@@ -367,7 +374,7 @@ async function requestImage(request,task,canContinue) {
     const generate=async()=>{
         if(task){task.status='正在生图';renderAll();}
         toastr.info('正在生图','喵喵文生图');
-        if(request.vibes?.length)return direct.generate(request);
+        if(isTT()||request.vibes?.length)return direct.generate(request);
         const response=await fetch('/api/novelai/generate-image',{method:'POST',headers:ctx().getRequestHeaders(),body:JSON.stringify(request),signal:AbortSignal.timeout(180000)});
         if(!response.ok)throw new Error(`NAI HTTP ${response.status}\n${(await response.text()).slice(0,1600)}`);
         const data=(await response.text()).trim();
@@ -447,7 +454,7 @@ async function openSettings() {
     const panel=createSettingsPanel({settings,save,theme:resolvedTheme,onTheme:applyTheme,onError:errorPopup,
         onChange:async action=>{
             if(action==='confirm-delete')return Boolean(await showPopup('删除当前配置？',POPUP_TYPE.CONFIRM));
-            autoSession=null;renderAll();
+            autoSession=null;refreshFloating();renderAll();
         },
         saveKey:async input=>{await saveCurrentKey({input,vault:directVault,settings,writeServerKey:key=>writeSecret(SECRET_KEYS.NOVEL,key),fingerprint:fingerprintKey,save});toastr.success(settings.rememberDirectKey?'NAI Key 已保存到酒馆和当前设备，刷新后可继续使用':'NAI Key 已保存，直连 Key 仅在当前页面暂存');},
         testImage,installDefaults,installWorld,installRegex,listImages,deleteImages,changeFolder,saveCapture,queueStatus,openImage,downloadImages,
@@ -472,6 +479,9 @@ function mountMenu() {
     item.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();guard(openSettings)();}});
     const menu=document.getElementById('extensionsMenu');if(menu)menu.append(item);
 }
+function refreshFloating(){
+    floatingDispose();floatingDispose=createFloatingEntry({settings,save,open:guard(openSettings),icon:document.querySelector('#miao-nai-menu .extensionsMenuExtensionButton')?.innerHTML||'喵'});
+}
 function autoLatest() {
     if(!settings.enabled||!autoSession?.enabled||autoSession.chat!==currentChat())return;
     const message=latestImageMessage(ctx().chat);
@@ -490,12 +500,13 @@ function scheduleRender(automatic=false) {
     clearTimeout(timer);timer=setTimeout(()=>guard(()=>{const auto=autoScheduled;autoScheduled=false;renderAll();if(auto)autoLatest();})(),80);
 }
 async function init() {
-    mountMenu();const c=ctx();save();
+    mountMenu();refreshFloating();const c=ctx();save();
     let migrated=false;for(const message of c.chat)migrated=migrateSwipeImages(message)||migrated;if(migrated)await c.saveChat();
     document.addEventListener('click',event=>{
         if(event.target.closest?.('.miao-image-card>img,.miao-image-tools'))return;
         imageToolsEpoch++;
         document.querySelectorAll('.miao-image-tools').forEach(tools=>{tools.hidden=true;});
+        document.querySelectorAll('.miao-image-card').forEach(card=>card._cancelGesture?.());
     });
     for(const name of ['CHARACTER_MESSAGE_RENDERED','MESSAGE_UPDATED','MESSAGE_SWIPED','MESSAGE_EDITED'])if(c.eventTypes[name])c.eventSource.on(c.eventTypes[name],messageId=>{
         // Final rendering and swipe navigation must release any stale stream lock.

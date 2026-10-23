@@ -90,10 +90,14 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
                 row.onclick=()=>{activeTab=id;render();root.closest('.popup-content')?.scrollTo({top:0});};overview.append(row);
             }
         } else if(activeTab==='generation') {
+            const interaction=section(body,'入口与图片操作');
+            field(interaction,'打开模式',settings.floatingEntry?'floating':'menu',v=>{settings.floatingEntry=v==='floating';save();onChange();},{options:[['menu','无悬浮窗 · 魔棒入口'],['floating','有悬浮窗 · 同时保留魔棒入口']]});
+            field(interaction,'重新生图手势',String(settings.rerollClicks===3?3:2),v=>{settings.rerollClicks=Number(v);save();onChange();},{options:[['2','双击图片'],['3','三击图片 · 减少误触']]});
             const main=section(body,'生成方式','自动生图仅处理开启期间的新回复；旧标签可手动生成。');
             const toggle=node('label',undefined,'miao-switch-row');const checkbox=node('input');checkbox.type='checkbox';checkbox.checked=settings.enabled;checkbox.onchange=()=>{settings.enabled=checkbox.checked;save();onChange();};toggle.append(node('span','启用自动生图'),checkbox);main.append(toggle);
             field(main,'最新楼层',settings.mode,v=>{settings.mode=v;save();onChange(true);render();},{options:[['manual','手动 · 点击按钮后生成'],['auto','自动 · 新回复完成后生成'],['stream','流式 · 完整标签出现后生成']]});
             const connection=section(body,'连接 NovelAI');
+            if(window.__TAURITAVERN__)connection.append(node('p','TT 酒馆使用本设备直连 Key 生图，请在此填写并保存。','miao-muted'));
             const key=field(connection,'API Key','',()=>{},{type:'password'});key.autocomplete='new-password';key.placeholder='输入你的 NovelAI Key';
             const remember=node('label',undefined,'miao-switch-row'),rememberCheck=node('input');rememberCheck.type='checkbox';rememberCheck.checked=!!settings.rememberDirectKey;rememberCheck.onchange=safe(async()=>{try{await setRememberDirectKey(rememberCheck.checked);}finally{rememberCheck.checked=!!settings.rememberDirectKey;await updateKeyState();}});remember.append(node('span','在此设备记住 Vibe 直连 Key'),rememberCheck);connection.append(remember);
             connection.append(node('p','勾选后立即记住本页已保存的 Key，更新或刷新后仍可使用。新输入的 Key 请点保存；Key 不会进入插件配置或 Vibe 文件。','miao-muted'));
@@ -101,7 +105,7 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
             const mask='••••••••••••';let directReady=false;
             key.addEventListener('focus',()=>{if(key.value===mask)key.value='';});
             key.addEventListener('blur',()=>{if(!key.value&&directReady)key.value=mask;});
-            const updateKeyState=async()=>{const status=await directKeyStatus();directReady=status.ready;keyState.textContent=directReady?(status.persistent?'✓ Key 已保存到当前设备，更新或刷新后可继续使用':'✓ Key 仅在当前页面暂存，刷新后需重填'):status.serverSaved?'酒馆端 Key 已保存；当前设备没有可用的 Vibe Key，请补填一次并保存。':'尚未保存 Key';if(document.activeElement!==key&&(!key.value||key.value===mask))key.value=directReady?mask:'';};safe(updateKeyState)();
+            const updateKeyState=async()=>{const status=await directKeyStatus();directReady=status.ready;keyState.textContent=directReady?(status.persistent?'✓ Key 已保存到当前设备，更新或刷新后可继续使用':'✓ Key 仅在当前页面暂存，刷新后需重填'):status.serverSaved?'酒馆端 Key 已保存；当前设备没有可用的直连 Key，请补填一次并保存。':'尚未保存 Key';if(document.activeElement!==key&&(!key.value||key.value===mask))key.value=directReady?mask:'';};safe(updateKeyState)();
             const actions=node('div',undefined,'miao-actions');connection.append(actions);action(actions,'保存密钥',async()=>{try{await saveKey(key.value===mask?'':key.value.trim());key.value='';}finally{await updateKeyState();}},true);action(actions,'测试生成',testImage);
             action(connection,'清除本设备直连 Key',async()=>{await clearDirectKey();await updateKeyState();});
             const queue=section(body,'共享 Key 排队');
@@ -240,7 +244,7 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
             action(controls,'清理选中日期',async()=>{if(!selected.size)throw new Error('请先勾选需要清理的日期');await deleteImages(selectedFolder,images.filter(i=>selected.has(i.day)).map(i=>i.name));await refresh();});
             refresh();
         }
-        const footer=node('footer',undefined,'miao-footer');footer.append(node('span','by 喵喵电波-NUE','miao-credit'),node('span','喵喵文生图 · 1.0.1'),updateBox);root.append(footer);
+        const footer=node('footer',undefined,'miao-footer');footer.append(node('span','by 喵喵电波-NUE','miao-credit'),node('span','喵喵文生图 · 1.1.0'),updateBox);root.append(footer);
     }
     render();checkLatest(false);return root;
 }
