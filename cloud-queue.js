@@ -9,7 +9,7 @@ export async function fingerprintKey(key) {
     const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(key.trim()));
     return [...new Uint8Array(bytes)].map(byte=>byte.toString(16).padStart(2,'0')).join('');
 }
-export async function runWithQueue({url,keyHash,greeting='',generate,onStatus=()=>{},canContinue=()=>true,onReleaseError=()=>{},fetchImpl=fetch,pollMs=2000,heartbeatMs=15000}) {
+export async function runWithQueue({url,keyHash,greeting='',generate,onStatus=()=>{},canContinue=()=>true,onReleaseError=()=>{},fetchImpl=fetch,pollMs=5000,heartbeatMs=15000}) {
     url=validateQueueURL(url);
     if(!/^[a-f0-9]{64}$/i.test(keyHash||''))throw new Error('请在本插件重新保存一次 NAI Key，用于自动识别队列；Key 不会发送给排队服务。');
     const identity={key_hash:keyHash,user_id:crypto.randomUUID(),task_id:crypto.randomUUID()};

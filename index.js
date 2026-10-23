@@ -13,7 +13,7 @@ const base=new URL('.',import.meta.url);
 const ctx=()=>getContext();
 const settings=extension_settings[ID] ??= {enabled:true,stream:false,pattern:'image###([\\s\\S]*?)###',profiles:[{...defaults}],active:0,installed:false};
 settings.mode ??= settings.stream ? 'stream' : 'manual';
-settings.theme ??= 'auto';
+settings.theme = 'auto';
 settings.folder ??= 'miao-nai';
 settings.folders ??= ['miao-nai'];
 settings.profiles=settings.profiles.map(normalizeProfile);
@@ -133,13 +133,7 @@ async function installDefaults() {
     await installWorld(new File([await w.text()],'[喵喵]文生图 2.0.json',{type:'application/json'}));
     await installRegex(await r.json());settings.installed=true;save();
 }
-function resolvedTheme() {
-    if(settings.theme!=='auto')return settings.theme;
-    const color=getComputedStyle(document.body).getPropertyValue('--SmartThemeBodyColor').trim();
-    const rgb=color.match(/[\d.]+/g)?.slice(0,3).map(Number);
-    if(rgb?.length===3)return (rgb[0]*.299+rgb[1]*.587+rgb[2]*.114)>140?'dark':'light';
-    return matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';
-}
+function resolvedTheme(){return 'host';}
 function applyTheme() {
     document.querySelectorAll('.miao-settings,.miao-image-card').forEach(n=>n.dataset.theme=resolvedTheme());
 }

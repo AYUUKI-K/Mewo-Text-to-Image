@@ -32,7 +32,7 @@ https://github.com/AYUUKI-K/Miao-Text-to-Image
 
 ## 开发版状态
 
-版本：0.4.0。已实测 NovelAI `nai-diffusion-4-5-full` 生成 512×512 图片，并完成 SillyTavern 1.18.0 的设置页生成、图片保存和弹窗展示测试。正文按钮与多图流式的真实聊天端到端测试仍需补充。
+版本：0.4.1。已实测 NovelAI `nai-diffusion-4-5-full` 生成 512×512 图片，并完成 SillyTavern 1.18.0 的设置页生成、图片保存和弹窗展示测试。正文按钮与多图流式的真实聊天端到端测试仍需补充。
 
 流式模式指文本输出期间标签闭合后生成图片，不包含 NAI 中间预览图。暂不包含配置导入导出、取消已发出的生成请求、Guidance Rescale 参数和资源自动停用。
 
@@ -80,3 +80,9 @@ npm test
 - 可选按 Key 指纹自动分队的云端队列：同 Key 串行、不同 Key 独立。只填一个共享服务地址，无需每把 Key 配置，也不需要额外酒馆后端插件。队列不接收 Key、提示词或图片。详见 [云端队列部署](QUEUE.md)。
 
 队列功能默认关闭。可使用管理员提供的服务地址，也提供免费 Render Web Service 的部署配置。
+
+## 0.4.1 更新
+
+界面直接跟随酒馆主题，参照喵喵大总结使用 `SmartThemeBodyColor`、`SmartThemeBlurTintColor`、`SmartThemeQuoteColor` 和 `SmartThemeBorderColor`。取消插件自己的配色切换，修改酒馆主题后自动同步。
+
+新增 Cloudflare Workers + 独立 SQLite Durable Object 队列部署；各 Key 由独立对象协调，排队状态可在实例重新加载后恢复。部署仅创建 `miao-image-queue` 及其专属绑定，不使用其他项目的 Worker、KV、域名或环境变量。

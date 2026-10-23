@@ -36,7 +36,6 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
             const main=section(body,'生成方式','自动生成只处理最新楼层；旧楼层随时可以手动点击。');
             const toggle=node('label',undefined,'miao-switch-row');const checkbox=node('input');checkbox.type='checkbox';checkbox.checked=settings.enabled;checkbox.onchange=()=>{settings.enabled=checkbox.checked;save();onChange();};toggle.append(node('span','启用文生图'),checkbox);main.append(toggle);
             field(main,'最新楼层',settings.mode,v=>{settings.mode=v;save();onChange(true);render();},{options:[['manual','手动 · 点击按钮后生成'],['auto','自动 · 载入或回复完成后生成'],['stream','流式 · 完整标签出现后生成']]});
-            field(main,'界面主题',settings.theme,v=>{settings.theme=v;save();onTheme();render();},{options:[['auto','跟随酒馆'],['light','蓝白 · 浅色'],['dark','蓝黑 · 深色']]});
             const connection=section(body,'连接 NovelAI','密钥保存在酒馆中，所有配置共用。');
             const key=field(connection,'API Key','',()=>{},{type:'password'});key.autocomplete='new-password';key.placeholder='输入你的 NovelAI Key';
             const actions=node('div',undefined,'miao-actions');connection.append(actions);action(actions,'保存密钥',async()=>{await saveKey(key.value.trim());key.value='';},true);action(actions,'测试生成',testImage);
@@ -115,7 +114,7 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
             action(controls,'清理选中日期',async()=>{if(!selected.size)throw new Error('请先勾选需要清理的日期');await deleteImages(selectedFolder,images.filter(i=>selected.has(i.day)).map(i=>i.name));await refresh();});
             refresh();
         }
-        const footer=node('footer',undefined,'miao-footer');footer.append(node('span','设置自动保存'),node('span','喵喵文生图 · 0.4.0'));root.append(footer);
+        const footer=node('footer',undefined,'miao-footer');footer.append(node('span','设置自动保存'),node('span','喵喵文生图 · 0.4.1'));root.append(footer);
     }
     render();return root;
 }

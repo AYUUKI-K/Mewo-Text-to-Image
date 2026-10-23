@@ -14,7 +14,19 @@
 
 如果在别的插件中切换或删除了酒馆 NAI Key，需要在本插件重新保存一次，重新关联当前 Key 的指纹。
 
-## 免费服务部署：Render
+## Cloudflare Workers 部署
+
+仓库提供 `wrangler.jsonc` 和 `cloudflare/worker.js`。创建独立 Worker `miao-image-queue`，连接本仓库，部署命令使用 `npx wrangler deploy`。配置只声明自己的 `MIAO_KEY_QUEUE` SQLite Durable Object 绑定，不声明任何其他项目的资源或路由。
+
+也可在仓库根目录用 Wrangler 登录后部署：
+
+```sh
+npx wrangler deploy --config wrangler.jsonc
+```
+
+Cloudflare 版每个 Key 使用一个独立的 Durable Object，并持久保存排队状态；过期状态由 alarm 清理。它使用当前账号的 Workers/Durable Objects 免费额度，具体额度见 [Cloudflare 官方定价](https://developers.cloudflare.com/durable-objects/platform/pricing/)。
+
+## 备选服务部署：Render
 
 仓库提供 `render.yaml`，也可手动新建一个 Web Service：
 
@@ -40,9 +52,9 @@ node queue-service/service.mjs
 ## 队列边界
 
 - 同一把 Key 的所有使用者必须使用**同一个队列服务**。绕过队列直接在官网或别处生成时，服务无法协调那次请求，NAI 仍可能返回占用或限流错误。
-- 当前服务是内存队列，只部署**一个实例**。重启会清空排队，不会自动重放可能已扣费的生成请求。
+- Node/Render 版为内存队列，只部署**一个实例**。重启会清空排队；Cloudflare 版由 Durable Object 持久协调。两者都不会自动重放可能已扣费的请求。
 - 等待中的任务持续轮询；断线约 90 秒后移除。持有生成权限的任务有超时租约，关闭页面不会永久卡住其他人。
 - 普通生成错误会释放排号，不自动重复调用 NAI。网络超时可能无法确认是否已生成，此时等待租约自然到期，降低撞车风险。
-- 服务不记录或公开 Key 指纹列表，也不显示其他用户的 Key。任意 HTTP 请求若携带 `key` 字段会被拒绝。
+- 服务不在日志或公共接口输出 Key 指纹列表，也不显示其他用户的 Key。任意 HTTP 请求若携带 `key` 字段会被拒绝。
 
 `npm test` 包括 A/B 同 Key、C 不同 Key 的并发测试，以及租约过期、重复入队、错误释放等测试，均不使用真实 NAI Key。

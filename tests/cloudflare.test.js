@@ -1,0 +1,27 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import worker,{MiaoKeyQueue} from '../cloudflare/worker.js';
+import {createHash} from 'node:crypto';
+const identity=(key,user)=>({key_hash:createHash('sha256').update(key).digest('hex'),user_id:'user-id-'+user,task_id:'task-id-'+user});
+function context(data=new Map()){
+ let pending=Promise.resolve();
+ return {data,storage:{async get(k){return structuredClone(data.get(k));},async put(k,v){data.set(k,structuredClone(v));},async deleteAll(){data.clear();},async deleteAlarm(){},async setAlarm(t){assert.ok(Number.isFinite(t));}},blockConcurrencyWhile(fn){const result=pending.then(fn);pending=result.catch(()=>{});return result;}};
+}
+const call=async(object,path,body)=>{const res=await object.fetch(new Request('https://queue.test'+path,{method:'POST',body:JSON.stringify(body)}));return {status:res.status,...await res.json()};};
+test('durable queue survives eviction and retains per-key mutual exclusion',async()=>{
+ const ctx=context(),a=identity('one','A'),b=identity('one','B');let object=new MiaoKeyQueue(ctx);
+ const first=await call(object,'/join-queue',a);assert.equal(first.your_turn,true);assert.equal((await call(object,'/join-queue',b)).your_turn,false);
+ object=new MiaoKeyQueue(context(ctx.data));assert.equal((await call(object,'/my-turn',b)).your_turn,false);
+ assert.equal((await call(object,'/complete',{...a,lock_token:first.lock_token})).released,true);
+ assert.equal((await call(object,'/my-turn',b)).your_turn,true);
+});
+test('edge router directs same keys to one object, different keys independently',async()=>{
+ const objects=new Map();const env={MIAO_KEY_QUEUE:{idFromName:name=>name,get(id){if(!objects.has(id))objects.set(id,new MiaoKeyQueue(context()));return objects.get(id);}}};
+ const request=(path,body)=>worker.fetch(new Request('https://queue.test'+path,{method:'POST',body:JSON.stringify(body)}),env);
+ const a=identity('one','A'),b=identity('one','B'),c=identity('two','C');
+ assert.equal((await (await request('/join-queue',a)).json()).your_turn,true);
+ assert.equal((await (await request('/join-queue',b)).json()).your_turn,false);
+ assert.equal((await (await request('/join-queue',c)).json()).your_turn,true);
+ assert.equal(objects.size,2);assert.equal((await request('/join-queue',{...a,key:'must-reject'})).status,400);assert.equal(objects.size,2);
+ const ping=await worker.fetch(new Request('https://queue.test/ping'),env);assert.equal((await ping.json()).ready,true);assert.equal(ping.headers.get('Access-Control-Allow-Origin'),'*');
+});
