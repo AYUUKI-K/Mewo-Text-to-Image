@@ -6,7 +6,7 @@ const root=new URL('../',import.meta.url);
 const prefix='/scripts/extensions/third-party/test/';
 const mock=`import {defaults} from '${prefix}core.js';
 const handlers=new Map();const chat=Array.from({length:6},(_,i)=>({name:'Preview',mes:i===3?'image###third###':i===5?'image###fifth###':'Floor '+i,extra:{}}));
-export const extension_settings={miao_nai_image:{enabled:true,mode:'manual',theme:'light',folder:'miao-nai',folders:['miao-nai'],pattern:'image###([\\\\s\\\\S]*?)###',profiles:[{...defaults}],active:0,installed:true}};
+export const extension_settings={miao_nai_image:{enabled:true,mode:'manual',theme:'light',folder:'miao-nai',folders:['miao-nai'],pattern:'image###([\\\\s\\\\S]*?)###',profiles:[{...defaults,name:'A',positive:'a style',steps:20},{...defaults,name:'B',positive:'b style',steps:28}],active:0,installed:true}};
 const context={chat,getCurrentChatId:()=>window.preview.chatId,getRequestHeaders:()=>({'Content-Type':'application/json'}),saveSettingsDebounced(){},async saveChat(){},eventTypes:Object.fromEntries(['CHAT_CHANGED','GENERATION_STARTED','GENERATION_ENDED','STREAM_TOKEN_RECEIVED','CHARACTER_MESSAGE_RENDERED','MESSAGE_UPDATED','MESSAGE_SWIPED','MESSAGE_EDITED'].map(x=>[x,x])),eventSource:{on(n,fn){if(!handlers.has(n))handlers.set(n,[]);handlers.get(n).push(fn);}}};
 window.preview={chat,chatId:'preview',settings:extension_settings.miao_nai_image,async emit(n){for(const fn of handlers.get(n)||[])await fn();},calls:[],files:['miao-1792737847709.png','miao-1792651447709.png','unrelated.png']};
 export const getContext=()=>context;
@@ -39,6 +39,7 @@ else if(req.url==='/scripts/secrets.js')body=`export const SECRET_KEYS={NOVEL:'n
 else if(req.url==='/scripts/world-info.js')body=`export const world_names=[],selected_world_info=[];export function onWorldInfoChange(){};export async function importWorldInfo(){}`;
 else if(req.url==='/scripts/extensions/regex/engine.js')body=`export const SCRIPT_TYPES={GLOBAL:0};export function getScriptsByType(){return [];}export async function saveScriptsByType(){}`;
 else if(req.url.startsWith(prefix)){const file=req.url.slice(prefix.length);if(!['index.js','core.js','ui.js','style.css'].includes(file))throw Error('Not found');body=await readFile(new URL(file,root));if(file.endsWith('.css'))type='text/css';}
+else if(req.url.startsWith('/user/images/')){body=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aL1sAAAAASUVORK5CYII=','base64');type='image/png';}
 else{res.writeHead(404);res.end();return;}
 res.writeHead(200,{'Content-Type':type+'; charset=utf-8'});res.end(body);
 }catch(e){res.writeHead(500);res.end(e.message);}});

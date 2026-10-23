@@ -5,7 +5,7 @@ import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
 import * as wi from '../../../world-info.js';
 import { getScriptsByType, saveScriptsByType, SCRIPT_TYPES } from '../../regex/engine.js';
 import { createSettingsPanel } from './ui.js';
-import { defaults, parseBlocks, buildRequest, latestImageMessage, canAutoGenerate, validateFolder, imageDay } from './core.js';
+import { defaults, parseBlocks, buildRequest, latestImageMessage, canAutoGenerate, validateFolder, imageDay, imageURL, normalizeProfile } from './core.js';
 
 const ID='miao_nai_image';
 const base=new URL('.',import.meta.url);
@@ -15,6 +15,7 @@ settings.mode ??= settings.stream ? 'stream' : 'manual';
 settings.theme ??= 'auto';
 settings.folder ??= 'miao-nai';
 settings.folders ??= ['miao-nai'];
+settings.profiles=settings.profiles.map(normalizeProfile);
 const running=new Map();
 const attempted=new Set();
 let queue=Promise.resolve(), streamActive=false, timer, autoScheduled=false, generationChat=null, settingsHost=null;
@@ -66,11 +67,12 @@ function makeCard(message,block) {
         const image=el('img');image.src=record.url;image.alt='生成的剧情插图';image.loading='lazy';link.append(image);card.append(link);
     }
     card.dataset.status=`${record?.deleted?'deleted':record?.url||''}:${task?.status||''}`;
-    const caption=el('div',undefined,'miao-image-caption');
-    caption.append(el('span',`插图 ${block.index+1}`),el('span',task?.status || (record?.deleted?'已清理':record?'已生成':'等待生成'),'miao-badge'));card.append(caption);
-    const button=el('button',task?.status || (record?'重新生成':'生成插图'),'miao-button miao-primary');button.type='button';button.disabled=!!task;
-    button.addEventListener('click',guard(()=>generate(message,block)));card.append(button);
-    const details=el('details'), summary=el('summary','查看提示词');details.append(summary,el('pre',block.prompt));card.append(details);
+    const actions=el('div',undefined,'miao-image-tools');
+    const iconButton=(label,icon,fn)=>{const button=el('button',undefined,'miao-icon-button');button.type='button';button.title=label;button.setAttribute('aria-label',label);const symbol=el('i',undefined,`fa-solid fa-${icon}`);symbol.setAttribute('aria-hidden','true');button.append(symbol);button.addEventListener('click',guard(fn));actions.append(button);return button;};
+    const button=iconButton(task?.status || (record?'重新生成':'生成插图'),task?'spinner':record?'rotate-right':'image',()=>generate(message,block));button.disabled=!!task;
+    if(task)button.classList.add('miao-spinning');
+    iconButton('查看提示词','sliders',()=>{const pre=el('pre',block.prompt);pre.style.whiteSpace='pre-wrap';return callGenericPopup(pre,POPUP_TYPE.TEXT);});
+    card.append(actions);
     return card;
 }
 function replaceLiteral(root,literal,node) {
@@ -93,7 +95,7 @@ function renderAll() {
             const card=makeCard(message,block);
             if(old) {
                 old.dataset.theme=card.dataset.theme;
-                if(old.dataset.status!==card.dataset.status) {card.querySelector('details').open=old.querySelector('details')?.open||false;old.replaceWith(card);}
+                if(old.dataset.status!==card.dataset.status)old.replaceWith(card);
             } else if(!replaceLiteral(root,block.raw,card))root.append(card);
         }
     });
@@ -152,7 +154,7 @@ async function imageAPI(endpoint,body) {
 async function listImages(folder) {
     folder=validateFolder(folder);
     const names=await (await imageAPI('list',{folder,sortField:'date',sortOrder:'desc'})).json();
-    return names.filter(name=>typeof name==='string'&&imageDay(name)).map(name=>({name,day:imageDay(name)}));
+    return names.filter(name=>typeof name==='string'&&imageDay(name)).map(name=>({name,day:imageDay(name),url:imageURL(folder,name)}));
 }
 async function deleteImages(folder,names) {
     folder=validateFolder(folder);
@@ -160,6 +162,9 @@ async function deleteImages(folder,names) {
     if(!names.length)return;
     if(names.some(name=>!allowed.has(name)))throw new Error('清理列表已变化，请刷新后重试');
     const question=el('div');question.append(el('h3',`清理 ${names.length} 张生成图片？`),el('p',`服务器目录：${folder}`),el('p','这会永久删除服务器上的文件，引用这些图片的聊天将无法再显示原图。'));
+    const previews=el('div',undefined,'miao-history-grid');
+    for(const name of names){const image=el('img');image.src=imageURL(folder,name);image.alt=name;image.loading='lazy';previews.append(image);}
+    question.append(previews);
     if(!await callGenericPopup(question,POPUP_TYPE.CONFIRM))return;
     const removed=[];let failure;
     for(const name of names) {
@@ -214,7 +219,7 @@ function scheduleRender(automatic=false) {
     clearTimeout(timer);timer=setTimeout(()=>guard(()=>{const auto=autoScheduled;autoScheduled=false;renderAll();if(auto)autoLatest();})(),80);
 }
 async function init() {
-    mountMenu();const c=ctx();
+    mountMenu();const c=ctx();save();
     for(const name of ['CHARACTER_MESSAGE_RENDERED','MESSAGE_UPDATED','MESSAGE_SWIPED','MESSAGE_EDITED'])if(c.eventTypes[name])c.eventSource.on(c.eventTypes[name],()=>scheduleRender(false));
     c.eventSource.on(c.eventTypes.CHAT_CHANGED,()=>{streamActive=false;generationChat=null;scheduleRender(true);});
     c.eventSource.on(c.eventTypes.GENERATION_STARTED,()=>{streamActive=true;generationChat=currentChat();});

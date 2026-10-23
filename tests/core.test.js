@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {parseBlocks,buildRequest,defaults,latestImageMessage,canAutoGenerate,validateFolder,imageDay} from '../core.js';
+import {parseBlocks,buildRequest,defaults,latestImageMessage,canAutoGenerate,validateFolder,imageDay,normalizeProfile,imageURL} from '../core.js';
 test('only #5 is eligible when #3 and #5 both contain tags',()=>{
  const chat=Array.from({length:6},(_,i)=>({mes:`floor ${i}`}));
  chat[3].mes='image###third###';chat[5].mes='image###fifth###';
@@ -42,4 +42,21 @@ test('positive ordering, negative isolation and profile snapshot',()=>{
 });
 test('invalid sizes and generation parameters rejected before charging',()=>{
  for(const patch of [{width:513},{height:0},{steps:51},{width:2048,height:2048},{seed:-2},{scale:NaN}])assert.throws(()=>buildRequest({...defaults,...patch},'cat'));
+});
+
+test('legacy artist fields merge exactly once into the matching profile',()=>{
+ const a=normalizeProfile({...defaults,positive:'a quality',artists:'a artist',steps:21});
+ assert.equal(a.positive,'a quality,\n'+'a artist');assert.equal(a.steps,21);assert.equal('artists' in a,false);
+ assert.deepEqual(normalizeProfile(a),a);
+});
+test('switching entire profiles keeps prompts, models and all parameters together',()=>{
+ const profiles=[{...defaults,positive:'A',model:'nai-diffusion-4-5-full',width:512,height:768,steps:21,seed:1},{...defaults,positive:'B',model:'nai-diffusion-4-5-curated',width:832,height:1216,steps:28,seed:2}];
+ const a=buildRequest(profiles[0],'scene');const b=buildRequest(profiles[1],'scene');
+ assert.equal(a.prompt,'A,\nscene');assert.equal(a.steps,21);assert.equal(a.width,512);
+ assert.equal(b.prompt,'B,\nscene');assert.equal(b.steps,28);assert.equal(b.width,832);assert.equal(b.model,'nai-diffusion-4-5-curated');
+ assert.equal(buildRequest(profiles[0],'scene').steps,21);
+});
+test('history thumbnail urls encode folder names and reject unrelated files',()=>{
+ assert.equal(imageURL('喵喵图片','miao-1792737847709.png'),'/user/images/'+encodeURIComponent('喵喵图片')+'/miao-1792737847709.png');
+ assert.throws(()=>imageURL('miao-nai','../other.png'));
 });
