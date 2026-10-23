@@ -22,21 +22,47 @@ export function validateFolder(value) {
     if(typeof value!=='string'||!value.trim()||value.length>64||!/^[\p{L}\p{N}_ -]+$/u.test(value))throw new Error('目录名可用中英文、数字、空格、短横线和下划线，最多 64 字；不支持绝对路径');
     return value.trim();
 }
-export function imageDay(filename) {
+export function imageTimestamp(filename) {
     const match=/^(?:miao|test)-(\d{13})(?:-[\da-f-]+)?\.png$/i.exec(filename);
     if(!match)return null;
-    const date=new Date(Number(match[1]));
+    return Number(match[1]);
+}
+export function compareImagesNewest(a,b){return (imageTimestamp(b.name)??0)-(imageTimestamp(a.name)??0)||b.name.localeCompare(a.name);}
+export function imageDay(filename) {
+    const timestamp=imageTimestamp(filename);if(timestamp===null)return null;
+    const date=new Date(timestamp);
     if(!Number.isFinite(date.getTime()))return null;
     return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
 }
-export function parseBlocks(text, pattern = 'image###([\\s\\S]*?)###') {
+export function parseBlocks(text, pattern = delimiterPattern('image###','###')) {
     const regex = new RegExp(pattern, 'gi');
     return [...String(text).matchAll(regex)].filter(m => m[1]?.trim()).map((m, index) => ({index, raw:m[0], prompt:m[1].trim(), start:m.index}));
+}
+// Markdown may split lines into paragraphs, or consume a hash-only closing line.
+// Keep offsets into the rendered text so a DOM Range replaces the original spot.
+export function renderedBlockRange(text,raw,startTag,endTag){
+    const exact=text.indexOf(raw);if(exact>=0)return {start:exact,end:exact+raw.length};
+    const offsets=[];let compact='';
+    for(let i=0;i<text.length;i++)if(!/\s/.test(text[i])){compact+=text[i];offsets.push(i);}
+    const find=value=>{const needle=value.replace(/\s/g,'');if(!needle)return null;const at=compact.indexOf(needle);return at<0?null:{start:offsets[at],end:offsets[at+needle.length-1]+1};};
+    const full=find(raw);if(full)return full;
+    if(/^#{1,6}$/.test(endTag)&&raw.startsWith(startTag)&&raw.endsWith(endTag)){
+        const body=find(raw.slice(0,-endTag.length));
+        if(body){
+            // Markdown may leave one or two hashes from a longer closing line.
+            const tail=text.slice(body.end).match(/^\s*(#{1,6})(?=\s|$)/);
+            if(tail&&tail[1].length<=endTag.length)body.end+=tail[0].length;
+            return body;
+        }
+    }
+    return null;
 }
 // Mask rather than remove: offsets still point into the original message.
 export function maskReasoning(text, configured={}) {
     let value=String(text??'');
-    const pairs=[['<think>','</think>'],['<thinking>','</thinking>'],['<analysis>','</analysis>'],['<reasoning>','</reasoning>']];
+    // Instructions in comments can mention an opening reasoning tag literally.
+    value=value.replace(/<!--[\s\S]*?(?:-->|$)/g,match=>match.replace(/[^\r\n]/g,' '));
+    const pairs=[['<think>','</think>'],['<thinking>','</thinking>'],['<analysis>','</analysis>'],['<reasoning>','</reasoning>'],['<imgthink>','</imgthink>'],['<imagethink>','</imagethink>']];
     if(configured.prefix?.trim())pairs.unshift([configured.prefix,configured.suffix||'']);
     const ranges=[];
     for(const [prefix,suffix] of pairs){
@@ -73,7 +99,8 @@ export const sizePresets=[{name:'方图',width:1024,height:1024},{name:'竖图',
 export function delimiterPattern(start,end) {
     if(typeof start!=='string'||typeof end!=='string'||!start||!end)throw new Error('起始标签和结束标签都要填写喵');
     const escape=value=>value.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
-    return `${escape(start)}([\\s\\S]*?)${escape(end)}`;
+    // Never use the closing portion of a NEW opening tag to close an older one.
+    return `${escape(start)}((?:(?!${escape(start)})[\\s\\S])*?)${escape(end)}`;
 }
 export function buildRequest(profile, prompt) {
     const p = normalizeProfile(profile);

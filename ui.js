@@ -1,5 +1,5 @@
 import {validateQueueURL} from './cloud-queue.js';
-import {sizePresets,pageItems,defaults} from './core.js';
+import {sizePresets,pageItems,defaults,compareImagesNewest} from './core.js';
 import {vibeModelKeys} from './vibe.js';
 const models=[['nai-diffusion-4-5-full','V4.5 Full'],['nai-diffusion-4-5-curated','V4.5 Curated'],['nai-diffusion-4-full','V4 Full'],['nai-diffusion-4-curated-preview','V4 Curated'],['nai-diffusion-3','V3 Anime'],['nai-diffusion-furry-3','V3 Furry']];
 const node=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
@@ -161,7 +161,7 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
             const upload=(label,fn)=>{const file=node('input');file.type='file';file.accept='.json';file.hidden=true;file.onchange=safe(async()=>{if(file.files[0])await fn(file.files[0]);file.value='';render();});resources.append(file);action(resources,label,()=>file.click());};
             upload('导入世界书',installWorld);upload('导入正则',async f=>installRegex(JSON.parse(await f.text())));
             const capture=section(body,'捕捉标签');
-            capture.append(node('p','自动排除酒馆当前「推理内容格式化」的前后缀，以及常见 think / analysis 标签。未闭合的思维链也不会生成图片。','miao-muted'));
+            capture.append(node('p','自动排除酒馆当前「推理内容格式化」的前后缀，以及 imgthink / think / analysis 等思考标签。未闭合的思维链也不会生成图片。','miao-muted'));
             const start=field(capture,'起始标签',settings.startTag,()=>{});start.placeholder='image###';
             const end=field(capture,'结束标签',settings.endTag,()=>{});end.placeholder='###';
             const sample=node('pre',undefined,'miao-capture-sample');
@@ -202,14 +202,14 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
             const refresh=async()=>{
                 list.replaceChildren(node('p','正在读取服务器图片…','miao-muted'));selected.clear();
                 try{
-                    images=(await listImages(selectedFolder)).sort((a,b)=>b.day.localeCompare(a.day)||b.name.localeCompare(a.name));draw();
+                    images=(await listImages(selectedFolder)).sort(compareImagesNewest);draw();
                 }catch(error){list.replaceChildren(node('p','读取失败，请刷新重试。'));onError(error);}
             };
             action(controls,'刷新列表',refresh);
             action(controls,'清理选中日期',async()=>{if(!selected.size)throw new Error('请先勾选需要清理的日期');await deleteImages(selectedFolder,images.filter(i=>selected.has(i.day)).map(i=>i.name));await refresh();});
             refresh();
         }
-        const footer=node('footer',undefined,'miao-footer');footer.append(node('span','设置自动保存'),node('span','喵喵文生图 · 0.5.3'));root.append(footer);
+        const footer=node('footer',undefined,'miao-footer');footer.append(node('span','设置自动保存'),node('span','喵喵文生图 · 0.5.4'));root.append(footer);
     }
     render();return root;
 }

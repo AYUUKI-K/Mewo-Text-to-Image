@@ -42,6 +42,14 @@ document.querySelector('[mesid="3"] button').click();await wait();check(p.calls.
 p.settings.mode='stream';p.chat.push({name:'Preview',mes:'image###partial',extra:{}});draw();await p.emit('GENERATION_STARTED');await p.emit('STREAM_TOKEN_RECEIVED');await wait();check(p.calls.length===2,'半截标签不发请求');
 p.chat.at(-1).mes='<star_cot>image###wrong in streaming###';draw();await p.emit('STREAM_TOKEN_RECEIVED');await wait();check(p.calls.length===2,'自定义流式思维链不生成图片');
 p.chat.at(-1).mes='image###stream complete###';draw();await p.emit('STREAM_TOKEN_RECEIVED');await wait();check(p.calls.length===3&&p.calls[2].prompt.includes('stream complete'),'闭合标签立即生成最新楼层');await p.emit('GENERATION_ENDED');await wait();check(p.calls.length===3,'回复结束不重复生成');
+p.chat.push({name:'Preview',mes:'<imgthink>image###自检示例### 9.信息完整性 10.扩展要求',extra:{}});draw();await p.emit('GENERATION_STARTED');await p.emit('STREAM_TOKEN_RECEIVED');await wait();check(p.calls.length===3,'世界书 imgthink 内完整示例不触发生成');
+p.chat.at(-1).mes+='</imgthink>image###未闭合的格式说明 image###sfw, 1boy, 1girl, school corridor#';draw();await p.emit('STREAM_TOKEN_RECEIVED');await wait();check(p.calls.length===3,'新起始标签不会误关闭旧标签，单个结束井号不生成');
+p.chat.at(-1).mes+='#';draw();await p.emit('STREAM_TOKEN_RECEIVED');await wait();check(p.calls.length===3,'两个结束井号仍不生成');
+p.chat.at(-1).mes+='#';draw();await p.emit('STREAM_TOKEN_RECEIVED');await wait();check(p.calls.length===4&&p.calls[3].prompt==='a style,\\nsfw, 1boy, 1girl, school corridor','第三个井号到达只发送正式提示词，无自检或格式说明');
+const lastRoot=document.querySelector('#chat .mes:last-child .mes_text');check(!lastRoot.querySelector('.miao-image-card'),'流式期间后台生图，不插入或刷新按钮卡片');
+lastRoot.innerHTML='<p id="before-image">前正文</p><p>image###</p><p>sfw, 1boy, 1girl, school corridor</p><h1>#</h1><p id="after-image">后正文</p>';
+await p.emit('GENERATION_ENDED');await wait();check(p.calls.length===4,'流式修复场景结束后不重复扣费');
+const placed=lastRoot.querySelector('.miao-image-card');check(!!placed&&(lastRoot.querySelector('#before-image').compareDocumentPosition(placed)&Node.DOCUMENT_POSITION_FOLLOWING)&&(placed.compareDocumentPosition(lastRoot.querySelector('#after-image'))&Node.DOCUMENT_POSITION_FOLLOWING)&&!lastRoot.textContent.includes('image###'),'Markdown 拆段后图片仍替换在前后正文之间，不追加到文末');
 check(!document.querySelector('#extensions_settings .miao-settings'),'扩展列表没有设置面板');
 }catch(error){results.push(error.stack);}document.getElementById('report').textContent=results.join('\\n');
 document.getElementById('miao-nai-menu').click();

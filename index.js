@@ -11,7 +11,7 @@ import {createDirectClient} from './direct-client.js';
 import {createKeyVault} from './direct-key.js';
 import {appendImageVersion,imageVersions} from './image-history.js';
 import {selectVibes} from './vibe.js';
-import { defaults, parseBodyBlocks, maskReasoning, buildRequest, latestImageMessage, canAutoGenerate, validateFolder, imageDay, imageURL, normalizeProfile, delimiterPattern } from './core.js';
+import { defaults, parseBodyBlocks, maskReasoning, renderedBlockRange, buildRequest, latestImageMessage, canAutoGenerate, validateFolder, imageDay, imageURL, normalizeProfile, delimiterPattern } from './core.js';
 
 const ID='miao_nai_image';
 const base=new URL('.',import.meta.url);
@@ -32,7 +32,8 @@ if(settings.startTag===undefined){
     settings.endTag=legacy?legacy[2].replace(/\\(.)/g,'$1'):'###';
 }
 settings.endTag ??= '###';
-settings.pattern ??= delimiterPattern(settings.startTag,settings.endTag);
+// The visible delimiters are authoritative, including for legacy saved patterns.
+settings.pattern = delimiterPattern(settings.startTag,settings.endTag);
 const running=new Map();
 const attempted=new Set();
 let queue=Promise.resolve(), streamActive=false, timer, autoScheduled=false, generationChat=null, settingsHost=null;
@@ -131,8 +132,8 @@ function makeCard(message,block) {
 function replaceLiteral(root,literal,node) {
     const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);const nodes=[];let text='',n;
     const customTag=reasoningFormat().prefix?.match(/^<([\w-]+)>$/)?.[1]?.toLowerCase();
-    while((n=walker.nextNode())) { if(n.parentElement.closest('.miao-image-card,.mes_reasoning,.mes_reasoning_details,think,thinking,analysis,reasoning')||(customTag&&n.parentElement.closest(customTag)))continue; nodes.push({n,start:text.length});text+=n.textContent; }
-    const start=maskReasoning(text,reasoningFormat()).indexOf(literal);if(start<0)return false;const end=start+literal.length;
+    while((n=walker.nextNode())) { if(n.parentElement.closest('.miao-image-card,.mes_reasoning,.mes_reasoning_details,think,thinking,analysis,reasoning,imgthink,imagethink')||(customTag&&n.parentElement.closest(customTag)))continue; if(nodes.length)text+='\n';nodes.push({n,start:text.length});text+=n.textContent; }
+    const found=renderedBlockRange(maskReasoning(text,reasoningFormat()),literal,settings.startTag,settings.endTag);if(!found)return false;const {start,end}=found;
     const a=nodes.find(x=>x.start+x.n.length>start),b=nodes.find(x=>x.start+x.n.length>=end);
     if(!a||!b)return false;
     const range=document.createRange();range.setStart(a.n,start-a.start);range.setEnd(b.n,end-b.start);range.deleteContents();range.insertNode(node);return true;
@@ -142,6 +143,9 @@ function renderAll() {
     document.querySelectorAll('#chat .mes').forEach(mes=>{
         const message=ctx().chat[Number(mes.getAttribute('mesid'))],root=mes.querySelector('.mes_text');
         if(!message||message.is_user||message.is_system||!root)return;
+        // Streaming markdown is continually rebuilt by ST. Generate in the
+        // background and insert cards only after its final message render.
+        if(streamActive&&generationChat===currentChat()&&message===latestImageMessage(ctx().chat))return;
         const found=blocks(message),valid=new Set(found.map(b=>identity(message,b)));
         root.querySelectorAll('.miao-image-card').forEach(n=>{if(!valid.has(n.dataset.miaoKey))n.remove();});
         for(const block of found) {
@@ -150,7 +154,7 @@ function renderAll() {
             if(old) {
                 old.dataset.theme=card.dataset.theme;
                 if(old.dataset.status!==card.dataset.status)old.replaceWith(card);
-            } else if(!replaceLiteral(root,block.raw,card))root.append(card);
+            } else replaceLiteral(root,block.raw,card);
         }
     });
 }
