@@ -4,6 +4,7 @@ import * as extensionAPI from '../../../extensions.js';
 import { saveBase64AsFile } from '../../../utils.js';
 import * as hostUtils from '../../../utils.js';
 import {bindImageGesture,createFloatingEntry} from './interactions.js';
+import {persistHostSettings} from './settings-save.js';
 import { writeSecret, SECRET_KEYS } from '../../../secrets.js';
 import { getCurrentUserHandle } from '../../../user.js';
 import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
@@ -46,7 +47,7 @@ settings.pattern = delimiterPattern(settings.startTag,settings.endTag);
 const running=new Map();
 const attempted=new Set();
 const cardBindings=new WeakMap();
-let chatObserver,observedChat,imageSaves=0;
+let chatObserver,chatRootObserver,observedChat,imageSaves=0;
 let queue=Promise.resolve(), streamActive=false, timer, autoScheduled=false, generationChat=null, settingsHost=null,imageToolsEpoch=0;
 let settingsPopup=null,autoSession=null,floatingDispose=()=>{},lastGestureReroll=0;
 const save=()=>ctx().saveSettingsDebounced();
@@ -79,6 +80,7 @@ async function errorPopup(error) {
     await showPopup(box,POPUP_TYPE.TEXT);
 }
 const guard=fn=>(...args)=>Promise.resolve().then(()=>fn(...args)).catch(errorPopup);
+const generationError=error=>toastr.error(String(error.message||error),'生图失败',{escapeHtml:true,timeOut:8000});
 function reasoningFormat(){const r=ctx().powerUserSettings?.reasoning||{};return {prefix:ctx().substituteParams?.(r.prefix||'')??r.prefix,suffix:ctx().substituteParams?.(r.suffix||'')??r.suffix};}
 function blocks(message) { return parseBodyBlocks(message.mes,settings.pattern,reasoningFormat()); }
 const blockSlot=block=>`body:${block.bodyIndex}:${block.prompt}`;
@@ -115,6 +117,9 @@ function taskFor(message,block){
     return [...running.values()].find(task=>{const target=taskTarget(task);return target?.message===message&&target.block.start===block.start;});
 }
 function generate(message,block,{automatic=false}={}) {
+    try{return startGeneration(message,block,{automatic});}catch(error){generationError(error);}
+}
+function startGeneration(message,block,{automatic=false}={}) {
     message=liveMessage(message);if(!message)throw Error('原楼层已切换，请重新点击当前图片');
     const key=identity(message,block), chat=currentChat(), taskId=`${chat}:${ctx().chat.indexOf(message)}:${key}`;
     if(running.has(taskId)||taskFor(message,block))return;
@@ -146,7 +151,7 @@ function generate(message,block,{automatic=false}={}) {
         toastr.success('生图完成','喵喵文生图');
     }).catch(error=>{
         task.status='失败，点击重试'; task.error=String(error.message||error);
-        void errorPopup(error).catch(()=>{});
+        generationError(error);
     }).finally(()=>{if(running.get(taskId)===task)running.delete(taskId);renderAll();});
 }
 function makeCard(message,block) {
@@ -223,8 +228,9 @@ function insertionOffset(text,message,block) {
     const masked=maskReasoning(message.mes,reasoningFormat());
     const prefix=sourceText(masked.slice(0,block.start)),suffix=sourceText(masked.slice(block.start+block.raw.length));
     const seek=(expected,fromEnd,from=0)=>{
-        for(let size=Math.min(96,expected.length);size>=8;size-=Math.min(8,size-7)){
+        for(let size=Math.min(96,expected.length);size>=1;size-=size>8?Math.min(8,size-8):1){
             const needle=fromEnd?expected.slice(-size):expected.slice(0,size),at=fromEnd?compact.lastIndexOf(needle):compact.indexOf(needle,from);
+            if(size<8&&compact.indexOf(needle)!==compact.lastIndexOf(needle))continue;
             if(at>=0)return {at,end:at+needle.length};
         }
         return null;
@@ -269,7 +275,9 @@ function replaceLiteral(root,literal,node,message,block) {
         const cards=[...root.querySelectorAll('.miao-image-card')],index=block.bodyIndex;
         const previous=cards.filter(card=>Number(card.dataset.miaoBodyIndex)<index).sort((a,b)=>Number(b.dataset.miaoBodyIndex)-Number(a.dataset.miaoBodyIndex))[0];
         const next=cards.filter(card=>Number(card.dataset.miaoBodyIndex)>index).sort((a,b)=>Number(a.dataset.miaoBodyIndex)-Number(b.dataset.miaoBodyIndex))[0];
-        if(previous)previous.after(node);else if(next)next.before(node);else return false;
+        if(previous)previous.after(node);else if(next)next.before(node);
+        else if(!text.trim())root.append(node);
+        else return false;
     }
     return true;
 }
@@ -277,7 +285,8 @@ function renderAll() {
     chatObserver?.disconnect();
     try{
     document.querySelectorAll('#chat .mes').forEach(mes=>{
-        const message=ctx().chat[Number(mes.getAttribute('mesid'))],root=mes.querySelector('.mes_text');
+        const index=mes.getAttribute('mesid');if(index===null||!/^\d+$/.test(index))return;
+        const message=ctx().chat[Number(index)],root=mes.querySelector('.mes_text');
         if(!message||!root)return;
         // Streaming markdown is continually rebuilt by ST. Generate in the
         // background and insert cards only after its final message render.
@@ -305,9 +314,17 @@ function renderAll() {
     }finally{observeChat();}
 }
 function observeChat(){
+    // Some hosts replace #chat or mount it after extensions have initialized.
+    if(!chatRootObserver){
+        chatRootObserver=new MutationObserver(()=>{
+            const root=document.getElementById('chat');if(root===observedChat)return;
+            chatObserver?.disconnect();observedChat=null;observeChat();scheduleRender(false);
+        });
+        chatRootObserver.observe(document.body,{childList:true,subtree:true});
+    }
     const root=document.getElementById('chat');if(!root)return;
     if(!chatObserver)chatObserver=new MutationObserver(()=>scheduleRender(false));
-    observedChat=root;chatObserver.observe(observedChat,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['src']});
+    observedChat=root;chatObserver.observe(observedChat,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['src','mesid']});
 }
 async function installWorld(file) {
     const data=JSON.parse(await file.text());if(!data.entries)throw new Error('世界书需要 entries 字段');
@@ -338,11 +355,13 @@ function applyTheme() {
     document.querySelectorAll('.miao-settings,.miao-image-card').forEach(n=>n.dataset.theme=resolvedTheme());
 }
 async function testImage() {
+    try{
     const request=buildRequest(settings.profiles[settings.active],'1girl, adult woman, white dress, flower garden, sunlight');
     request.vibes=selectVibes(settings.profiles[settings.active],settings.vibeLibrary);
     const data=await requestImage(request);
     const url=await saveBase64AsFile(data,validateFolder(settings.folder),`test-${Date.now()}-${crypto.randomUUID()}`,'png');
     await openImage(url);
+    }catch(error){generationError(error);}
 }
 function saveCapture(start,end) {
     const pattern=delimiterPattern(start,end);settings.startTag=start;settings.endTag=end;settings.pattern=pattern;save();renderAll();toastr.success('捕捉标签已保存');
@@ -451,7 +470,7 @@ async function deleteImages(folder,names) {
 }
 async function openSettings() {
     if(settingsHost?.isConnected)return;
-    const panel=createSettingsPanel({settings,save,theme:resolvedTheme,onTheme:applyTheme,onError:errorPopup,
+    const panel=createSettingsPanel({settings,save,persistSettings:()=>persistHostSettings({saveNow:async()=>{const host=await import('../../../../script.js');return host.saveSettings();},source:ctx().eventSource,event:ctx().eventTypes.SETTINGS_UPDATED}),theme:resolvedTheme,onTheme:applyTheme,onError:errorPopup,
         onChange:async action=>{
             if(action==='confirm-delete')return Boolean(await showPopup('删除当前配置？',POPUP_TYPE.CONFIRM));
             autoSession=null;refreshFloating();renderAll();
@@ -508,7 +527,7 @@ async function init() {
         document.querySelectorAll('.miao-image-tools').forEach(tools=>{tools.hidden=true;});
         document.querySelectorAll('.miao-image-card').forEach(card=>card._cancelGesture?.());
     });
-    for(const name of ['CHARACTER_MESSAGE_RENDERED','MESSAGE_UPDATED','MESSAGE_SWIPED','MESSAGE_EDITED'])if(c.eventTypes[name])c.eventSource.on(c.eventTypes[name],messageId=>{
+    for(const name of ['CHAT_LOADED','MORE_MESSAGES_LOADED','USER_MESSAGE_RENDERED','MESSAGE_RECEIVED','CHARACTER_MESSAGE_RENDERED','MESSAGE_UPDATED','MESSAGE_SWIPED','MESSAGE_EDITED'])if(c.eventTypes[name])c.eventSource.on(c.eventTypes[name],messageId=>{
         // Final rendering and swipe navigation must release any stale stream lock.
         if(name==='MESSAGE_SWIPED'||name==='CHARACTER_MESSAGE_RENDERED'&&Number(messageId)===ctx().chat.length-1){streamActive=false;generationChat=null;}
         if(name==='CHARACTER_MESSAGE_RENDERED'&&Number(messageId)===ctx().chat.length-1){autoLatest();autoSession=null;}
