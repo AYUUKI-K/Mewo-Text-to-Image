@@ -27,7 +27,7 @@ export function vibeSummary(item){return {id:item.id,name:item.name,thumbnail:it
 export function resolveVibes(model,bindings,library){
     if(bindings!==undefined&&!Array.isArray(bindings))throw Error('Vibe 列表格式错误');
     if(!bindings?.length)return {};
-    if(bindings.length>16)throw Error('最多同时启用 16 个 Vibe');
+    if(bindings.length>4)throw Error('本插件最多同时启用 4 个 Vibe');
     const modelKey=vibeModelKeys[model];if(!modelKey)throw Error('当前 Vibe 支持 V4 / V4.5 模型，请切换模型');
     const images=[],strengths=[];
     for(const binding of bindings){

@@ -5,7 +5,7 @@ const models=[['nai-diffusion-4-5-full','V4.5 Full'],['nai-diffusion-4-5-curated
 const node=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
 export function createSettingsPanel({settings,save,theme,onTheme,onChange,onError,saveKey,testImage,installDefaults,installWorld,installRegex,listImages,deleteImages,changeFolder,saveCapture,queueStatus,openImage,listVibes,importVibeFile,encodeVibe,deleteVibe,renameVibe,directKeyStatus,clearDirectKey,setRememberDirectKey,closeSettings}) {
     const root=node('section',undefined,'miao-settings');root.id='miao-nai-settings';
-    let activeTab=matchMedia('(max-width:680px), (max-height:500px)').matches?'overview':'generation',fieldId=0,promptTab='positive';
+    let activeTab=matchMedia('(max-width:680px), (max-height:500px)').matches?'overview':'generation',fieldId=0,promptTab='positive',selectedVibeId=null;
     const safe=fn=>async()=>{try{await fn();}catch(e){onError(e);}};
     function action(parent,label,fn,primary=false) {
         const b=node('button',label,`miao-button${primary?' miao-primary':''}`);b.type='button';
@@ -31,8 +31,8 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
             for(const item of items){
                 const row=node('div',undefined,'miao-vibe-choice'),label=node('label',undefined,'miao-switch-row'),check=node('input');check.type='checkbox';
                 const variants=item.variants.filter(v=>v.model===vibeModelKeys[p.model]);
-                let binding=(p.vibes||[]).find(v=>v.id===item.id);check.checked=!!binding;check.disabled=!variants.length&&!binding;
-                check.onchange=()=>{p.vibes??=[];if(check.checked)p.vibes.push({id:item.id,key:variants[0].key,strength:0.6});else p.vibes=p.vibes.filter(v=>v.id!==item.id);save();profileVibes(parent,p);};
+                let binding=(p.vibes||[]).find(v=>v.id===item.id);check.checked=!!binding;check.disabled=(!variants.length&&!binding)||(!binding&&(p.vibes||[]).length>=4);
+                check.onchange=()=>{p.vibes??=[];if(check.checked&&p.vibes.length>=4){check.checked=false;onError(Error('最多同时启用 4 个 Vibe'));return;}if(check.checked)p.vibes.push({id:item.id,key:variants[0].key,strength:0.6});else p.vibes=p.vibes.filter(v=>v.id!==item.id);save();profileVibes(parent,p);};
                 label.append(node('span',item.name),check);row.append(label);
                 if(binding){
                     const grid=node('div',undefined,'miao-grid');row.append(grid);
@@ -81,8 +81,11 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
             const remember=node('label',undefined,'miao-switch-row'),rememberCheck=node('input');rememberCheck.type='checkbox';rememberCheck.checked=!!settings.rememberDirectKey;rememberCheck.onchange=safe(()=>setRememberDirectKey(rememberCheck.checked));remember.append(node('span','在此设备记住 Vibe 直连 Key'),rememberCheck);connection.append(remember);
             connection.append(node('p','默认只在当前页面暂存。勾选后再保存，Key 才会存入当前浏览器；不会进入插件配置或 Vibe 文件。','miao-muted'));
             const keyState=node('p','正在检查直连 Key…','miao-muted');connection.append(keyState);
-            const updateKeyState=async()=>{keyState.textContent=await directKeyStatus()?'当前设备可直连 Vibe':'当前设备还没有直连 Key';};safe(updateKeyState)();
-            const actions=node('div',undefined,'miao-actions');connection.append(actions);action(actions,'保存密钥',async()=>{await saveKey(key.value.trim());key.value='';await updateKeyState();},true);action(actions,'测试生成',testImage);
+            const mask='••••••••••••';
+            key.addEventListener('focus',()=>{if(key.value===mask)key.value='';});
+            key.addEventListener('blur',()=>{if(!key.value&&settings.keyHash)key.value=mask;});
+            const updateKeyState=async()=>{const directReady=await directKeyStatus();keyState.textContent=settings.keyHash?(directReady?'✓ Key 已保存 · 当前设备可使用 Vibe':'✓ 酒馆 Key 已保存 · Vibe 请在此设备重新填写'):'尚未保存 Key';if(settings.keyHash&&(!key.value||key.value===mask))key.value=mask;};safe(updateKeyState)();
+            const actions=node('div',undefined,'miao-actions');connection.append(actions);action(actions,'保存密钥',async()=>{if(key.value&&key.value!==mask)await saveKey(key.value.trim());else if(!settings.keyHash)throw Error('请填写 Key');key.value='';await updateKeyState();},true);action(actions,'测试生成',testImage);
             action(connection,'清除本设备直连 Key',async()=>{await clearDirectKey();await updateKeyState();});
             const queue=section(body,'共享 Key 排队','同一个 Key 轮流生成，不同 Key 各走各的队列。');
             const queueToggle=node('label',undefined,'miao-switch-row'),queueCheck=node('input');queueCheck.type='checkbox';queueCheck.checked=settings.cloudQueue;queueCheck.onchange=()=>{settings.cloudQueue=queueCheck.checked;save();};queueToggle.append(node('span','启用云端排队'),queueCheck);queue.append(queueToggle);
@@ -114,7 +117,7 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
             for(const preset of sizePresets){const b=action(sizes,preset.name,()=>{p.width=preset.width;p.height=preset.height;save();render();});b.append(node('small',`${preset.width}×${preset.height}`));b.classList.add('miao-size-preset');b.dataset.selected=String(p.width===preset.width&&p.height===preset.height);b.setAttribute('aria-pressed',b.dataset.selected);}
             const grid=node('div',undefined,'miao-grid');params.append(grid);
             for(const [key,label,type] of [['width','宽度','number'],['height','高度','number'],['steps','步数','number'],['scale','Guidance','number'],['seed','种子','number'],['sampler','采样器','text'],['scheduler','噪声表','text']]){const choices=key==='sampler'?[['k_euler_ancestral','Euler Ancestral'],['k_euler','Euler'],['k_dpmpp_2m','DPM++ 2M'],['k_dpmpp_2s_ancestral','DPM++ 2S Ancestral'],['k_dpmpp_sde','DPM++ SDE']]:key==='scheduler'?[['karras','Karras'],['native','Native'],['exponential','Exponential'],['polyexponential','Polyexponential']]:null;const options=choices&&!choices.some(([id])=>id===p[key])?[[p[key],p[key]],...choices]:choices;field(grid,label,p[key],v=>{p[key]=v;save();},{type,options,wide:['seed','sampler','scheduler'].includes(key)});}
-            const vibes=section(body,'本配置的 Vibe','勾选、编码和强度随当前配置一起保存；不勾选时使用普通生图。');
+            const vibes=section(body,'本配置的 Vibe','最多同时启用 4 个 Vibe；选择、编码和强度随当前配置保存。不勾选时使用普通生图。');
             const choices=node('div',undefined,'miao-vibe-choices');vibes.append(choices);profileVibes(choices,p);
         } else if(activeTab==='vibes') {
             const manage=section(body,'Vibe 氛围列表','导入 NAI 的 .naiv4vibe / .naiv4vibeBundle，或上传图片后编码。启用哪些 Vibe，请到「配置」页勾选。');
@@ -127,10 +130,11 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
                 try{
                     const items=await listVibes();list.replaceChildren();
                     if(!items.length)list.append(node('p','还没有 Vibe，点击导入开始。','miao-muted'));
-                    for(const item of items){
+                    if(items.length){if(!items.some(item=>item.id===selectedVibeId))selectedVibeId=items[0].id;field(list,'当前 Vibe',selectedVibeId,value=>{selectedVibeId=value;refresh();},{options:items.map(item=>[item.id,item.name])});}
+                    for(const item of items.filter(item=>item.id===selectedVibeId)){
                         const card=node('section',undefined,'miao-vibe-item');
                         if(item.thumbnail){const image=node('img');image.src=item.thumbnail;image.alt=item.name;image.loading='lazy';card.append(image);}
-                        field(card,'名称',item.name,()=>{}).addEventListener('change',safe(async()=>{await renameVibe({id:item.id,name:card.querySelector('input').value});}));
+                        field(card,'名称',item.name,()=>{}).addEventListener('change',safe(async()=>{await renameVibe({id:item.id,name:card.querySelector('input').value});await refresh();}));
                         const summary=node('p',item.variants.length?item.variants.map(v=>`${v.model} · ${v.information}`).join(' / '):'尚未编码','miao-muted');card.append(summary);
                         if(item.hasImage){
                             const grid=node('div',undefined,'miao-grid');card.append(grid);
@@ -143,7 +147,7 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
                     }
                 }catch(error){list.replaceChildren(node('p',error.message,'miao-muted'));}
             };
-            upload.onchange=safe(async()=>{for(const file of upload.files)await importVibeFile(file);upload.value='';await refresh();});
+            upload.onchange=safe(async()=>{for(const file of upload.files){const imported=await importVibeFile(file);if(imported?.length)selectedVibeId=imported.at(-1).id;}upload.value='';await refresh();});
             action(actions,'导入 Vibe / 图片',()=>upload.click(),true);action(actions,'刷新列表',refresh);
             manage.append(node('p','已编码文件可直接使用。V4/V4.5 新编码或修改信息提取量通常消耗 2 Anlas；超过 4 个 Vibe 时也可能增加生图费用。','miao-muted'));refresh();
         } else if(activeTab==='resources') {
@@ -201,7 +205,7 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
             action(controls,'清理选中日期',async()=>{if(!selected.size)throw new Error('请先勾选需要清理的日期');await deleteImages(selectedFolder,images.filter(i=>selected.has(i.day)).map(i=>i.name));await refresh();});
             refresh();
         }
-        const footer=node('footer',undefined,'miao-footer');footer.append(node('span','设置自动保存'),node('span','喵喵文生图 · 0.5.1'));root.append(footer);
+        const footer=node('footer',undefined,'miao-footer');footer.append(node('span','设置自动保存'),node('span','喵喵文生图 · 0.5.2'));root.append(footer);
     }
     render();return root;
 }

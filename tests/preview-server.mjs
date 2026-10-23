@@ -61,7 +61,7 @@ else if(req.url==='/lib/jszip.min.js'&&process.env.MIAO_ST_ROOT)body=await readF
 else if(req.url==='/fixture-nai.zip'){body=fixtureZip();type='application/zip';}
 else if(req.url==='/scripts/world-info.js')body=`export const world_names=[],selected_world_info=[];export function onWorldInfoChange(){};export async function importWorldInfo(){}`;
 else if(req.url==='/scripts/extensions/regex/engine.js')body=`export const SCRIPT_TYPES={GLOBAL:0};export function getScriptsByType(){return [];}export async function saveScriptsByType(){}`;
-else if(req.url.startsWith(prefix)){const file=req.url.slice(prefix.length);if(!['index.js','core.js','vibe.js','direct-client.js','direct-key.js','cloud-queue.js','ui.js','style.css'].includes(file))throw Error('Not found');body=await readFile(new URL(file,root));if(file.endsWith('.css'))type='text/css';}
+else if(req.url.startsWith(prefix)){const file=req.url.slice(prefix.length);if(!['index.js','core.js','vibe.js','direct-client.js','direct-key.js','image-history.js','cloud-queue.js','ui.js','style.css'].includes(file))throw Error('Not found');body=await readFile(new URL(file,root));if(file.endsWith('.css'))type='text/css';}
 else if(req.url.startsWith('/user/images/')){body=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aL1sAAAAASUVORK5CYII=','base64');type='image/png';}
 else{res.writeHead(404);res.end();return;}
 res.writeHead(200,{'Content-Type':type+'; charset=utf-8'});res.end(body);

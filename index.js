@@ -9,6 +9,7 @@ import { getScriptsByType, saveScriptsByType, SCRIPT_TYPES } from '../../regex/e
 import { createSettingsPanel } from './ui.js';
 import {createDirectClient} from './direct-client.js';
 import {createKeyVault} from './direct-key.js';
+import {appendImageVersion,imageVersions} from './image-history.js';
 import { defaults, parseBodyBlocks, maskReasoning, buildRequest, latestImageMessage, canAutoGenerate, validateFolder, imageDay, imageURL, normalizeProfile, delimiterPattern } from './core.js';
 
 const ID='miao_nai_image';
@@ -87,7 +88,7 @@ function generate(message,block,{automatic=false}={}) {
         const url=await saveBase64AsFile(data,folder,`miao-${Date.now()}-${crypto.randomUUID()}`,'png');
         // Do not attach stale results to another chat or edited/swiped messages.
         if(!stillValid(chat,message,block,key)) { toastr.info('图片已保存，但原消息已切换或修改：'+url); return; }
-        message.extra??={}; message.extra[ID]??={}; message.extra[ID][key]={url,request,created:Date.now()};
+        message.extra??={}; message.extra[ID]??={}; message.extra[ID][key]=appendImageVersion(message.extra[ID][key],{url,request,created:Date.now()});
         await ctx().saveChat();
     }).catch(async error=>{
         task.status='失败，点击重试'; task.error=String(error.message||error);
@@ -100,17 +101,29 @@ function makeCard(message,block) {
     card.dataset.miaoKey=key;
     const record=state(message,key);
     const task=[...running.values()].find(t=>t.chat===currentChat() && t.message===message && t.key===key);
-    if(record?.url&&!record.deleted) {
-        const link=el('a');link.href=record.url;link.addEventListener('click',event=>{event.preventDefault();guard(()=>openImage(record.url))();});
-        const image=el('img');image.src=record.url;image.alt='生成的剧情插图';image.loading='lazy';link.append(image);card.append(link);
+    const versions=imageVersions(record),wanted=Math.min(record?.selected??versions.length-1,versions.length-1),selected=versions[wanted]?.deleted?versions.findLastIndex(v=>!v.deleted):wanted,current=versions[selected];
+    const actions=el('div',undefined,'miao-image-tools');actions.hidden=true;
+    const button=(label,fn)=>{const b=el('button',label,'miao-button');b.type='button';b.addEventListener('click',guard(fn));actions.append(b);return b;};
+    if(current?.url&&!current.deleted){
+        const image=el('img');image.src=current.url;image.alt='生成的剧情插图';image.loading='lazy';image.tabIndex=0;image.setAttribute('role','button');image.setAttribute('aria-label','单击图片显示选项，双击重新生成');
+        let clickTimer,lastTap=0;
+        const reroll=()=>{clearTimeout(clickTimer);actions.hidden=true;if(!task)guard(()=>generate(message,block))();};
+        image.addEventListener('click',event=>{if(event.detail>1)return;clearTimeout(clickTimer);clickTimer=setTimeout(()=>{actions.hidden=!actions.hidden;},280);});
+        image.addEventListener('dblclick',event=>{event.preventDefault();reroll();});
+        image.addEventListener('touchend',event=>{const now=Date.now();if(now-lastTap<300){event.preventDefault();reroll();lastTap=0;}else lastTap=now;},{passive:false});
+        image.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();actions.hidden=!actions.hidden;}});
+        card.append(image);
+        if(versions.length>1){
+            const switchTo=async index=>{record.selected=(index+versions.length)%versions.length;const item=versions[record.selected];Object.assign(record,{url:item.url,request:item.request,created:item.created,deleted:item.deleted||false});await ctx().saveChat();card.dataset.status='';renderAll();const replacement=[...document.querySelectorAll('.miao-image-card')].find(n=>n.dataset.miaoKey===key&&n.closest('.mes')?.getAttribute('mesid')===String(ctx().chat.indexOf(message)));if(replacement)replacement.querySelector('.miao-image-tools').hidden=false;};
+            button('上一张',()=>switchTo(selected-1));actions.append(el('span',String(selected+1)+' / '+versions.length,'miao-version-count'));button('下一张',()=>switchTo(selected+1));
+        }
+        button('查看提示词',()=>showPrompt(current.request?.prompt||block.prompt));
+        button('下载图片',()=>downloadImage(current.url));button('放大查看',()=>openImage(current.url));
+    }else{
+        actions.hidden=false;button(task?.status||'生成插图',()=>generate(message,block)).disabled=!!task;button('查看提示词',()=>showPrompt(block.prompt));
     }
-    card.dataset.status=`${record?.deleted?'deleted':record?.url||''}:${task?.status||''}`;
-    const actions=el('div',undefined,'miao-image-tools');
-    const iconButton=(label,icon,fn)=>{const button=el('button',undefined,'miao-icon-button');button.type='button';button.title=label;button.setAttribute('aria-label',label);const symbol=el('i',undefined,`fa-solid fa-${icon}`);symbol.setAttribute('aria-hidden','true');button.append(symbol);button.addEventListener('click',guard(fn));actions.append(button);return button;};
-    const button=iconButton(task?.status || (record?'重新生成':'生成插图'),task?'spinner':record?'rotate-right':'image',()=>generate(message,block));button.disabled=!!task;
-    if(task)button.classList.add('miao-spinning');
-    if(record?.url&&!record.deleted)iconButton('下载图片','download',()=>downloadImage(record.url));
-    iconButton('查看提示词','sliders',()=>showPrompt(block.prompt));
+    if(task)card.append(el('span',task.status,'miao-image-progress'));
+    card.dataset.status=String(selected)+':'+versions.map(v=>v.url+':'+!!v.deleted).join('|')+':'+(task?.status||'');
     card.append(actions);
     return card;
 }
@@ -263,6 +276,7 @@ async function deleteImages(folder,names) {
     }
     const paths=new Set(removed.map(name=>`user/images/${folder}/${name}`));let changed=false;
     for(const message of ctx().chat)for(const record of Object.values(message.extra?.[ID]||{})) {
+        for(const version of imageVersions(record)){if(paths.has(String(version.url).replace(/^\//,''))){version.deleted=true;changed=true;}}
         if(paths.has(String(record.url).replace(/^\//,''))){record.deleted=true;changed=true;}
     }
     if(changed)await ctx().saveChat();renderAll();

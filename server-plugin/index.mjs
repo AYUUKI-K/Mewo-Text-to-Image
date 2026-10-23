@@ -54,7 +54,7 @@ export function registerRoutes(router,{readKey,extractPNG,fetchImpl=fetch}){
     router.post('/generate-image',safe(async(req,res)=>{
         const input=req.body,request=buildRequest({...input,positive:input.prompt||'',negative:input.negative_prompt||''},'');
         if(!vibeModelKeys[request.model])throw Error('Vibe 生图只支持 V4 / V4.5');
-        if(!Array.isArray(input.vibes)||input.vibes.length>16)throw Error('Vibe 列表格式错误，最多启用 16 个');
+        if(!Array.isArray(input.vibes)||input.vibes.length>4)throw Error('Vibe 列表格式错误，本插件最多启用 4 个');
         const selected=[];for(const binding of input.vibes){const item=await read(req,binding.id);selected.push({id:item.id,name:item.name,encodings:item.encodings});}
         const references=resolveVibes(request.model,input.vibes,selected);
         const data={action:'generate',input:request.prompt,model:request.model,parameters:{params_version:3,width:request.width,height:request.height,steps:request.steps,scale:request.scale,seed:request.seed,sampler:request.sampler,noise_schedule:request.scheduler,n_samples:1,negative_prompt:request.negative_prompt,qualityToggle:false,ucPreset:0,sm:false,sm_dyn:false,dynamic_thresholding:false,legacy:false,legacy_v3_extend:false,add_original_image:false,controlnet_strength:1,deliberate_euler_ancestral_bug:false,prefer_brownian:true,cfg_rescale:0,uncond_scale:1,use_coords:false,characterPrompts:[],...references,v4_prompt:{caption:{base_caption:request.prompt,char_captions:[]},use_coords:false,use_order:true},v4_negative_prompt:{caption:{base_caption:request.negative_prompt,char_captions:[]}}}};

@@ -51,7 +51,7 @@ export function createDirectClient({settings,save,getHeaders,getKey,unzipPNG,fet
             item=await read(id);(item.encodings[modelKey]??={})[key]={encoding,params:{information_extracted:information}};return write(item);
         },
         async generate(request){
-            if(!Array.isArray(request.vibes)||request.vibes.length>16)throw Error('Vibe 列表格式错误，最多启用 16 个');
+            if(!Array.isArray(request.vibes)||request.vibes.length>4)throw Error('Vibe 列表格式错误，本插件最多启用 4 个');
             const library=[];for(const binding of request.vibes||[]){const item=await read(binding.id);library.push({id:item.id,name:item.name,encodings:item.encodings});}
             const references=resolveVibes(request.model,request.vibes,library);
             const response=await nai('generate-image',naiPayload(request,references));
