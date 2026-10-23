@@ -84,7 +84,7 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
             const mask='••••••••••••';
             key.addEventListener('focus',()=>{if(key.value===mask)key.value='';});
             key.addEventListener('blur',()=>{if(!key.value&&settings.keyHash)key.value=mask;});
-            const updateKeyState=async()=>{const directReady=await directKeyStatus();keyState.textContent=settings.keyHash?(directReady?'✓ Key 已保存 · 当前设备可使用 Vibe':'✓ 酒馆 Key 已保存 · Vibe 请在此设备重新填写'):'尚未保存 Key';if(settings.keyHash&&(!key.value||key.value===mask))key.value=mask;};safe(updateKeyState)();
+            const updateKeyState=async()=>{const directReady=await directKeyStatus();keyState.textContent=settings.keyHash?(directReady?'✓ Key 已保存 · 当前设备可使用 Vibe':'✓ 酒馆 Key 已保存 · Vibe 请在此设备重新填写'):'尚未保存 Key';if(settings.keyHash&&document.activeElement!==key&&(!key.value||key.value===mask))key.value=mask;};safe(updateKeyState)();
             const actions=node('div',undefined,'miao-actions');connection.append(actions);action(actions,'保存密钥',async()=>{if(key.value&&key.value!==mask)await saveKey(key.value.trim());else if(!settings.keyHash)throw Error('请填写 Key');key.value='';await updateKeyState();},true);action(actions,'测试生成',testImage);
             action(connection,'清除本设备直连 Key',async()=>{await clearDirectKey();await updateKeyState();});
             const queue=section(body,'共享 Key 排队','同一个 Key 轮流生成，不同 Key 各走各的队列。');
