@@ -1,0 +1,5 @@
+tests/request.json
+tests/response.bin
+node_modules/
+*.log
+.env

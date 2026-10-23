@@ -1,0 +1,70 @@
+[
+  {
+    "id": "9d3a2fdf-7cde-4cb5-a17e-29c955ce435b",
+    "scriptName": "喵喵文生图1-去标签-0820",
+    "disabled": false,
+    "runOnEdit": true,
+    "findRegex": "/┈┈[\\s\\S]*?┈┈|image###[\\s\\S]*?###|<easter_egg>\\s*([\\s\\S]*?)\\s*<\\/easter_egg>/gi",
+    "trimStrings": [],
+    "replaceString": "",
+    "placement": [
+      2
+    ],
+    "substituteRegex": 0,
+    "minDepth": null,
+    "maxDepth": null,
+    "markdownOnly": false,
+    "promptOnly": true
+  },
+  {
+    "id": "8407e6cf-4500-4cd9-9455-939aafdf7101",
+    "scriptName": "喵喵文生图2-去imagethink-0511",
+    "disabled": false,
+    "runOnEdit": true,
+    "findRegex": "/<imgthink>[\\s\\S]*?<\\/imgthink>/gi",
+    "trimStrings": [],
+    "replaceString": "",
+    "placement": [
+      2
+    ],
+    "substituteRegex": 0,
+    "minDepth": null,
+    "maxDepth": null,
+    "markdownOnly": true,
+    "promptOnly": true
+  },
+  {
+    "id": "ff3cb76e-e821-414d-ad49-9d49fb8e1903",
+    "scriptName": "喵喵文生图3-居中美化-0511",
+    "disabled": false,
+    "runOnEdit": true,
+    "findRegex": "/┈┈([\\s\\S]*?)┈┈/gi",
+    "trimStrings": [],
+    "replaceString": "<div style=\"text-align: center;\">\n  ┈┈$1┈┈\n</div>",
+    "placement": [
+      2
+    ],
+    "substituteRegex": 0,
+    "minDepth": null,
+    "maxDepth": null,
+    "markdownOnly": true,
+    "promptOnly": false
+  },
+  {
+    "id": "80b95c4d-ed3c-497d-9723-e112dc881e5d",
+    "scriptName": "喵喵文生图4-彩蛋介绍美化-0820",
+    "findRegex": "/<easter_egg>\\s*([\\s\\S]*?)\\s*<\\/easter_egg>/gi",
+    "replaceString": "<div style=\"\n  width: 88%;\n  margin: 0.8em auto 0.4em;\n  text-align: center;\n  color: currentColor;\n  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', 'PingFang SC', sans-serif;\n  font-size: 0.68em;\n  line-height: 1.7;\n  letter-spacing: 0.05em;\n  font-style: italic;\n  opacity: 0.48;\n  box-sizing: border-box;\n\">\n  $1\n</div>",
+    "trimStrings": [],
+    "placement": [
+      2
+    ],
+    "disabled": false,
+    "markdownOnly": true,
+    "promptOnly": false,
+    "runOnEdit": true,
+    "substituteRegex": 0,
+    "minDepth": null,
+    "maxDepth": null
+  }
+]

@@ -1,0 +1,10 @@
+{
+  "display_name": "喵喵文生图",
+  "loading_order": 110,
+  "js": "index.js",
+  "css": "style.css",
+  "author": "NUE-喵喵电波",
+  "version": "0.1.0",
+  "auto_update": false,
+  "homePage": "https://github.com/AYUUKI-K/Miao-Text-to-Image"
+}
