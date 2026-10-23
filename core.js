@@ -33,6 +33,12 @@ export function parseBlocks(text, pattern = 'image###([\\s\\S]*?)###') {
     const regex = new RegExp(pattern, 'gi');
     return [...String(text).matchAll(regex)].filter(m => m[1]?.trim()).map((m, index) => ({index, raw:m[0], prompt:m[1].trim(), start:m.index}));
 }
+export const sizePresets=[{name:'方图',width:1024,height:1024},{name:'竖图',width:832,height:1216},{name:'横图',width:1216,height:832}];
+export function delimiterPattern(start,end) {
+    if(typeof start!=='string'||typeof end!=='string'||!start||!end)throw new Error('起始标签和结束标签都要填写喵');
+    const escape=value=>value.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    return `${escape(start)}([\\s\\S]*?)${escape(end)}`;
+}
 export function buildRequest(profile, prompt) {
     const p = normalizeProfile(profile);
     for (const key of ['width','height']) if (!Number.isInteger(+p[key]) || +p[key]<64 || +p[key]>2048 || +p[key]%64) throw new Error('宽高须为 64～2048 的 64 倍数');

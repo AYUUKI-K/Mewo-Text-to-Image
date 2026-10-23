@@ -1,6 +1,8 @@
+import {validateQueueURL} from './cloud-queue.js';
+import {sizePresets} from './core.js';
 const models=[['nai-diffusion-4-5-full','V4.5 Full'],['nai-diffusion-4-5-curated','V4.5 Curated'],['nai-diffusion-4-full','V4 Full'],['nai-diffusion-4-curated-preview','V4 Curated'],['nai-diffusion-3','V3 Anime'],['nai-diffusion-furry-3','V3 Furry']];
 const node=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
-export function createSettingsPanel({settings,save,theme,onTheme,onChange,onError,saveKey,testImage,installDefaults,installWorld,installRegex,listImages,deleteImages,changeFolder}) {
+export function createSettingsPanel({settings,save,theme,onTheme,onChange,onError,saveKey,testImage,installDefaults,installWorld,installRegex,listImages,deleteImages,changeFolder,saveCapture,queueStatus,openImage}) {
     const root=node('section',undefined,'miao-settings');root.id='miao-nai-settings';
     let activeTab='generation',fieldId=0,promptTab='positive';
     const safe=fn=>async()=>{try{await fn();}catch(e){onError(e);}};
@@ -38,6 +40,11 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
             const connection=section(body,'连接 NovelAI','密钥保存在酒馆中，所有配置共用。');
             const key=field(connection,'API Key','',()=>{},{type:'password'});key.autocomplete='new-password';key.placeholder='输入你的 NovelAI Key';
             const actions=node('div',undefined,'miao-actions');connection.append(actions);action(actions,'保存密钥',async()=>{await saveKey(key.value.trim());key.value='';},true);action(actions,'测试生成',testImage);
+            const queue=section(body,'共享 Key 排队','同一个 Key 轮流生成，不同 Key 各走各的队列。');
+            const queueToggle=node('label',undefined,'miao-switch-row'),queueCheck=node('input');queueCheck.type='checkbox';queueCheck.checked=settings.cloudQueue;queueCheck.onchange=()=>{settings.cloudQueue=queueCheck.checked;save();};queueToggle.append(node('span','启用云端排队'),queueCheck);queue.append(queueToggle);
+            field(queue,'队列服务地址',settings.queueUrl,v=>{settings.queueUrl=v.trim();save();}).placeholder='https://你的队列.onrender.com';
+            const status=node('p',settings.keyHash?'已能自动识别当前 Key':'首次使用排队，请在上方重新保存一次 Key。','miao-muted');queue.append(status);
+            action(queue,'检查队列连接',async()=>{validateQueueURL(settings.queueUrl);await queueStatus();status.textContent='队列连接成功喵';});
         } else if(activeTab==='config') {
             const profiles=section(body,'配置');
             field(profiles,'当前配置',String(settings.active),v=>{settings.active=Number(v);save();render();},{options:settings.profiles.map((p,i)=>[String(i),p.name])});
@@ -59,7 +66,7 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
             }sync();
             const params=section(workspace,'生成参数');
             const sizes=node('div',undefined,'miao-actions');params.append(sizes);
-            for(const [w,h,label] of [[512,512,'方形'],[832,1216,'竖图'],[1216,832,'横图']])action(sizes,label,()=>{p.width=w;p.height=h;save();render();});
+            for(const preset of sizePresets){const b=action(sizes,`${preset.name} ${preset.width} × ${preset.height}`,()=>{p.width=preset.width;p.height=preset.height;save();render();});b.classList.add('miao-size-preset');b.dataset.selected=String(p.width===preset.width&&p.height===preset.height);b.setAttribute('aria-pressed',b.dataset.selected);}
             const grid=node('div',undefined,'miao-grid');params.append(grid);
             for(const [key,label,type] of [['width','宽度','number'],['height','高度','number'],['steps','步数','number'],['scale','Guidance','number'],['seed','种子','number'],['sampler','采样器','text'],['scheduler','噪声表','text']]){const choices=key==='sampler'?[['k_euler_ancestral','Euler Ancestral'],['k_euler','Euler'],['k_dpmpp_2m','DPM++ 2M'],['k_dpmpp_2s_ancestral','DPM++ 2S Ancestral'],['k_dpmpp_sde','DPM++ SDE']]:key==='scheduler'?[['karras','Karras'],['native','Native'],['exponential','Exponential'],['polyexponential','Polyexponential']]:null;const options=choices&&!choices.some(([id])=>id===p[key])?[[p[key],p[key]],...choices]:choices;field(grid,label,p[key],v=>{p[key]=v;save();},{type,options});}
         } else if(activeTab==='resources') {
@@ -68,9 +75,14 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
             action(resources,'载入默认资源',async()=>{await installDefaults();render();},true);
             const upload=(label,fn)=>{const file=node('input');file.type='file';file.accept='.json';file.hidden=true;file.onchange=safe(async()=>{if(file.files[0])await fn(file.files[0]);file.value='';render();});resources.append(file);action(resources,label,()=>file.click());};
             upload('导入世界书',installWorld);upload('导入正则',async f=>installRegex(JSON.parse(await f.text())));
-            const advanced=node('details',undefined,'miao-advanced');advanced.append(node('summary','高级：标签捕捉规则'));resources.append(advanced);
-            const pattern=field(advanced,'捕捉表达式',settings.pattern,()=>{},{});
-            action(advanced,'保存捕捉规则',()=>{new RegExp(pattern.value,'gi');if(!pattern.value.includes('('))throw new Error('表达式需要第一捕获组，用于提取提示词');settings.pattern=pattern.value;save();onChange();});
+            const capture=section(body,'捕捉标签');
+            const start=field(capture,'起始标签',settings.startTag,()=>{});start.placeholder='image###';
+            const end=field(capture,'结束标签',settings.endTag,()=>{});end.placeholder='###';
+            const sample=node('pre',undefined,'miao-capture-sample');
+            const updateSample=()=>{sample.textContent=start.value+'\n这里是绘图提示词\n'+end.value;};start.addEventListener('input',updateSample);end.addEventListener('input',updateSample);updateSample();capture.append(sample);
+            action(capture,'保存标签',()=>{saveCapture(start.value,end.value);},true);
+            resources.append(node('p','导入的正则会添加到酒馆全局正则；已有同名或同 ID 的规则会复用。','miao-muted'));
+
         }
         if(activeTab==='images') {
             const storage=section(body,'服务器存储','图片保存在酒馆服务器，不占用浏览器存储。目录位于服务器 user/images 下。');
@@ -94,7 +106,7 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
                         label.append(check,node('span',day),node('small',`${count} 张`));row.append(label);
                         action(row,'清理',async()=>{await deleteImages(selectedFolder,images.filter(i=>i.day===day).map(i=>i.name));await refresh();});group.append(row);
                         const gallery=node('div',undefined,'miao-history-grid');
-                        for(const image of images.filter(i=>i.day===day)){const link=node('a');link.href=image.url;link.target='_blank';link.rel='noopener';const thumb=node('img');thumb.src=image.url;thumb.alt=image.name;thumb.loading='lazy';link.title=image.name;link.append(thumb);gallery.append(link);}
+                        for(const image of images.filter(i=>i.day===day)){const link=node('a');link.href=image.url;link.addEventListener('click',event=>{event.preventDefault();openImage(image.url,image.name);});const thumb=node('img');thumb.src=image.url;thumb.alt=image.name;thumb.loading='lazy';link.title=image.name;link.append(thumb);gallery.append(link);}
                         group.append(gallery);list.append(group);
                     }
                 }catch(error){list.replaceChildren(node('p','读取失败，请刷新重试。'));onError(error);}
@@ -103,7 +115,7 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
             action(controls,'清理选中日期',async()=>{if(!selected.size)throw new Error('请先勾选需要清理的日期');await deleteImages(selectedFolder,images.filter(i=>selected.has(i.day)).map(i=>i.name));await refresh();});
             refresh();
         }
-        const footer=node('footer',undefined,'miao-footer');footer.append(node('span','设置自动保存'),node('span','喵喵文生图 · 0.3.0'));root.append(footer);
+        const footer=node('footer',undefined,'miao-footer');footer.append(node('span','设置自动保存'),node('span','喵喵文生图 · 0.4.0'));root.append(footer);
     }
     render();return root;
 }

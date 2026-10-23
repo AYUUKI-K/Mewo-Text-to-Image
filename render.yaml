@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: miao-image-queue
+    runtime: node
+    plan: free
+    buildCommand: node --check queue-service/service.mjs
+    startCommand: node queue-service/service.mjs
+    healthCheckPath: /ping
+    envVars:
+      - key: NODE_VERSION
+        value: 22
