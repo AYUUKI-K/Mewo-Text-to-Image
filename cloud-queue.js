@@ -28,10 +28,10 @@ export async function runWithQueue({url,keyHash,greeting='',generate,onStatus=()
             onStatus(`云端排队 · 前面 ${state.position||1} 张`);
             await new Promise(resolve=>setTimeout(resolve,pollMs));state=await call('/my-turn');
         }
-        onStatus('生成中');
+        onStatus('正在生图');
         heartbeat=setInterval(async()=>{
             if(renewing)return;renewing=true;
-            try {await call('/my-turn',{lock_token:lockToken});}catch {onStatus('生成中 · 队列连接暂时中断');}finally{renewing=false;}
+            try {await call('/my-turn',{lock_token:lockToken});}catch {onStatus('排队连接暂时中断');}finally{renewing=false;}
         },heartbeatMs);
         try{return await generate();}
         catch(error){uncertain=['AbortError','TimeoutError','TypeError'].includes(error.name);throw error;}

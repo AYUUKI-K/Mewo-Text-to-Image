@@ -44,7 +44,20 @@ export function renderedBlockRange(text,raw,startTag,endTag){
     const exact=text.indexOf(raw);if(exact>=0)return {start:exact,end:exact+raw.length};
     const offsets=[];let compact='';
     for(let i=0;i<text.length;i++)if(!/\s/.test(text[i])){compact+=text[i];offsets.push(i);}
-    const find=value=>{const needle=value.replace(/\s/g,'');if(!needle)return null;const at=compact.indexOf(needle);return at<0?null:{start:offsets[at],end:offsets[at+needle.length-1]+1};};
+    const stripMarkdown=value=>String(value)
+        .replace(/!\[([^\]]*)\]\([^)]*\)/g,'$1')
+        .replace(/\[([^\]]+)\]\([^)]*\)/g,'$1')
+        .replace(/<!--[\s\S]*?-->/g,'')
+        .replace(/<\/?[A-Za-z][^>]*>/g,'')
+        .replace(/`{1,3}|\*{2}|_{2}|~~/g,'');
+    const find=value=>{
+        const candidates=[String(value),stripMarkdown(value)];
+        for(const candidate of candidates){
+            const needle=candidate.replace(/\s/g,'');if(!needle)continue;
+            const at=compact.indexOf(needle);if(at>=0)return {start:offsets[at],end:offsets[at+needle.length-1]+1};
+        }
+        return null;
+    };
     const full=find(raw);if(full)return full;
     if(/^#{1,6}$/.test(endTag)&&raw.startsWith(startTag)&&raw.endsWith(endTag)){
         const body=find(raw.slice(0,-endTag.length));
@@ -93,7 +106,7 @@ export function parseBodyBlocks(text,pattern,format={}){
     const original=String(text??''),previous=parseBlocks(original,pattern);
     return parseBlocks(maskReasoning(original,format),pattern)
         .filter(b=>original.slice(b.start,b.start+b.raw.length)===b.raw)
-        .map(b=>({...b,index:previous.find(old=>old.start===b.start)?.index??b.index}));
+        .map((b,bodyIndex)=>({...b,bodyIndex,index:previous.find(old=>old.start===b.start)?.index??b.index}));
 }
 export const sizePresets=[{name:'方图',width:1024,height:1024},{name:'竖图',width:832,height:1216},{name:'横图',width:1216,height:832}];
 export function delimiterPattern(start,end) {

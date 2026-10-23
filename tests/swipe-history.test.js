@@ -41,3 +41,21 @@ test('deleting an earlier swipe shifts records together and does not resurrect i
     assert.equal(readSwipeImage(message,0,slot).url,'page-1.png');assert.equal(readSwipeImage(message,1,slot).url,'page-2.png');
     assert.equal(swipeImageRecords(message).length,2);assert.equal(readSwipeImage(message,2,slot),undefined);
 });
+test('a unique prompt retains versions when reasoning changes its raw numeric index',()=>{
+    const message={swipe_id:0,extra:{}};writeSwipeImage(message,0,'3:cat\n sun',first);
+    const previous=readSwipeImage(message,0,'0:cat sun',true);assert.equal(previous.url,'first.png');
+    writeSwipeImage(message,0,'0:cat sun',appendImageVersion(previous,{...first,url:'rerolled.png'}));
+    assert.equal(swipeImageRecords(message).length,1);assert.equal(readSwipeImage(message,0,'0:cat sun').versions.length,2);
+});
+test('identical tags at two positions never borrow another position by prompt fallback',()=>{
+    const message={swipe_id:0,extra:{}};writeSwipeImage(message,0,'0:cat',first);
+    assert.equal(readSwipeImage(message,0,'1:cat'),undefined);
+    writeSwipeImage(message,0,'1:cat',{...first,url:'separate.png'});
+    assert.equal(readSwipeImage(message,0,'0:cat').url,'first.png');assert.equal(readSwipeImage(message,0,'1:cat').url,'separate.png');
+});
+test('legacy duplicate prompts migrate individually into stable body positions',()=>{
+    const message={swipe_id:0,extra:{}};writeSwipeImage(message,0,'1:cat',first);writeSwipeImage(message,0,'2:cat',{...first,url:'other.png'});
+    assert.equal(readSwipeImage(message,0,'body:0:cat',false,'1:cat').url,'first.png');
+    assert.equal(readSwipeImage(message,0,'body:1:cat',false,'2:cat').url,'other.png');
+    assert.equal(swipeImageRecords(message).length,2);
+});

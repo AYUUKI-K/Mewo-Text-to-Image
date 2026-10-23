@@ -18,6 +18,7 @@ test('nested and repeated reasoning blocks are excluded and separate extra reaso
 test('body cards retain existing image identities after reasoning exclusion',()=>{
  const text='<think>image###draft###</think>image###same### image###same###';
  assert.deepEqual(parseBodyBlocks(text).map(b=>[b.index,b.prompt]),[[1,'same'],[2,'same']]);
+ assert.deepEqual(parseBodyBlocks(text).map(b=>b.bodyIndex),[0,1]);
  assert.equal(parseBodyBlocks('image###a<think>secret</think>b###').length,0);
 });
 test('image pagination has no duplicates, clamps after deletion and handles empty galleries',()=>{
