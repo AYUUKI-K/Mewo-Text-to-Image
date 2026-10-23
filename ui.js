@@ -41,7 +41,7 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
             const actions=node('div',undefined,'miao-actions');connection.append(actions);action(actions,'保存密钥',async()=>{await saveKey(key.value.trim());key.value='';},true);action(actions,'测试生成',testImage);
             const queue=section(body,'共享 Key 排队','同一个 Key 轮流生成，不同 Key 各走各的队列。');
             const queueToggle=node('label',undefined,'miao-switch-row'),queueCheck=node('input');queueCheck.type='checkbox';queueCheck.checked=settings.cloudQueue;queueCheck.onchange=()=>{settings.cloudQueue=queueCheck.checked;save();};queueToggle.append(node('span','启用云端排队'),queueCheck);queue.append(queueToggle);
-            field(queue,'队列服务地址',settings.queueUrl,v=>{settings.queueUrl=v.trim();save();}).placeholder='https://你的队列.onrender.com';
+            field(queue,'队列服务地址',settings.queueUrl,v=>{settings.queueUrl=v.trim();save();}).placeholder='https://miao-image-queue.savlu329.workers.dev';
             const status=node('p',settings.keyHash?'已能自动识别当前 Key':'首次使用排队，请在上方重新保存一次 Key。','miao-muted');queue.append(status);
             action(queue,'检查队列连接',async()=>{validateQueueURL(settings.queueUrl);await queueStatus();status.textContent='队列连接成功喵';});
         } else if(activeTab==='config') {
@@ -114,7 +114,7 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
             action(controls,'清理选中日期',async()=>{if(!selected.size)throw new Error('请先勾选需要清理的日期');await deleteImages(selectedFolder,images.filter(i=>selected.has(i.day)).map(i=>i.name));await refresh();});
             refresh();
         }
-        const footer=node('footer',undefined,'miao-footer');footer.append(node('span','设置自动保存'),node('span','喵喵文生图 · 0.4.1'));root.append(footer);
+        const footer=node('footer',undefined,'miao-footer');footer.append(node('span','设置自动保存'),node('span','喵喵文生图 · 0.4.2'));root.append(footer);
     }
     render();return root;
 }

@@ -5,7 +5,7 @@ export default {
     async fetch(request,env){
         const path=new URL(request.url).pathname;
         if(request.method==='OPTIONS')return new Response(null,{status:204,headers});
-        if(request.method==='GET'&&path==='/ping')return reply({ready:true,version:'0.4.1',runtime:'cloudflare'});
+        if(request.method==='GET'&&path==='/ping')return reply({ready:true,version:'0.4.2',runtime:'cloudflare'});
         if(request.method==='GET'&&path==='/')return reply({name:'喵喵文生图队列',ready:true,privacy:'只接收 Key 指纹，不接收 Key、提示词或图片'});
         if(request.method!=='POST')return reply({error:'Use POST'},405);
         if(!['/join-queue','/my-turn','/complete','/leave-queue'].includes(path))return reply({error:'Not found'},404);

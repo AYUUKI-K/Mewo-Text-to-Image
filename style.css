@@ -1,4 +1,4 @@
-/* Theme tokens are scoped to this extension, independent of the tavern theme. */
+/* Scoped extension tokens inherit the live SillyTavern theme. */
 .miao-settings,.miao-image-card,.miao-image-viewer,.miao-settings-dialog{--mi-bg:var(--SmartThemeBlurTintColor,Canvas);--mi-surface:var(--SmartThemeBlurTintColor,Canvas);--mi-ink:var(--SmartThemeBodyColor,CanvasText);--mi-muted:color-mix(in srgb,var(--mi-ink) 72%,transparent);--mi-line:var(--SmartThemeBorderColor,color-mix(in srgb,var(--mi-ink) 18%,transparent));--mi-blue:var(--SmartThemeQuoteColor,Highlight);--mi-soft:color-mix(in srgb,var(--mi-blue) 12%,transparent);--mi-field:color-mix(in srgb,var(--mi-ink) 5%,transparent);color:var(--mi-ink);font-family:inherit;box-sizing:border-box}
 .miao-settings-dialog{width:min(780px,calc(100vw - 32px))!important;max-width:calc(100vw - 24px)!important;padding:0!important;border:1px solid var(--mi-line)!important;border-radius:22px!important;overflow:hidden!important;background:var(--mi-bg)!important}
 .miao-settings-dialog .popup-body{padding:0!important;gap:0!important;overflow:auto;max-height:90dvh}

@@ -31,7 +31,10 @@ document.getElementById('miao-nai-menu').click();
 </script>`;
 const server=http.createServer(async(req,res)=>{try{
 let body,type='text/javascript';
-if(req.url==='/'){body=html;type='text/html';}
+if(req.url==='/'||req.url?.startsWith('/?theme=')){
+const dark=new URL(req.url,'http://localhost').searchParams.get('theme')==='dark';
+const hostTheme=dark?'--SmartThemeBodyColor:#e5ebf5;--SmartThemeBlurTintColor:#121b2b;--SmartThemeQuoteColor:#83b7ff;--SmartThemeBorderColor:#35435b':'--SmartThemeBodyColor:#26364c;--SmartThemeBlurTintColor:#f8fbff;--SmartThemeQuoteColor:#3779c5;--SmartThemeBorderColor:#cedbea';
+body=html.replace('<style>','<style>:root{'+hostTheme+'}');type='text/html';}
 else if(req.url==='/scripts/extensions.js')body=mock;
 else if(req.url==='/scripts/popup.js')body=popup;
 else if(req.url==='/scripts/utils.js')body=`export async function saveBase64AsFile(){return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aL1sAAAAASUVORK5CYII=';}`;
@@ -43,4 +46,5 @@ else if(req.url.startsWith('/user/images/')){body=Buffer.from('iVBORw0KGgoAAAANS
 else{res.writeHead(404);res.end();return;}
 res.writeHead(200,{'Content-Type':type+'; charset=utf-8'});res.end(body);
 }catch(e){res.writeHead(500);res.end(e.message);}});
-server.listen(8766,'127.0.0.1',()=>console.log('Isolated preview: http://127.0.0.1:8766'));
+const port=Number(process.env.MIAO_PREVIEW_PORT||8766);
+server.listen(port,'127.0.0.1',()=>console.log('Isolated preview: http://127.0.0.1:'+port));

@@ -18,7 +18,7 @@ settings.folder ??= 'miao-nai';
 settings.folders ??= ['miao-nai'];
 settings.profiles=settings.profiles.map(normalizeProfile);
 settings.cloudQueue ??= false;
-settings.queueUrl ??= '';
+settings.queueUrl ||= 'https://miao-image-queue.savlu329.workers.dev';
 settings.keyHash ??= '';
 if(settings.startTag===undefined){
     const legacy=(settings.pattern||'').match(/^(.*?)\(\[\\s\\S\]\*\?\)(.*?)$/);

@@ -5,6 +5,7 @@
   "compatibility_date": "2026-10-23",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
+  "preview_urls": false,
   "durable_objects": {
     "bindings": [{"name": "MIAO_KEY_QUEUE", "class_name": "MiaoKeyQueue"}]
   },
