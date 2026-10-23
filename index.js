@@ -14,6 +14,7 @@ import {appendImageVersion,imageVersions,selectImageVersion} from './image-histo
 import {selectVibes} from './vibe.js';
 import {createExtensionUpdater} from './updates.js';
 import {downloadImageSelection} from './downloads.js';
+import {migrateSwipeImages,readSwipeImage,writeSwipeImage,swipeImageRecords,removeSwipeImages} from './swipe-history.js';
 import { defaults, parseBodyBlocks, maskReasoning, renderedBlockRange, buildRequest, latestImageMessage, canAutoGenerate, validateFolder, imageDay, imageURL, normalizeProfile, delimiterPattern } from './core.js';
 
 const ID='miao_nai_image';
@@ -75,9 +76,15 @@ const guard=fn=>(...args)=>Promise.resolve().then(()=>fn(...args)).catch(errorPo
 function reasoningFormat(){const r=ctx().powerUserSettings?.reasoning||{};return {prefix:ctx().substituteParams?.(r.prefix||'')??r.prefix,suffix:ctx().substituteParams?.(r.suffix||'')??r.suffix};}
 function blocks(message) { return parseBodyBlocks(message.mes,settings.pattern,reasoningFormat()); }
 function identity(message,block) { return `${message.swipe_id??0}:${block.index}:${block.prompt}`; }
-function state(message,key) { return message.extra?.[ID]?.[key]; }
+function state(message,key) {const at=key.indexOf(':');return readSwipeImage(message,Number(key.slice(0,at)),key.slice(at+1));}
 function currentChat() { return String(ctx().getCurrentChatId()); }
-function stillValid(chat,message,block,key) { return currentChat()===chat && ctx().chat.includes(message) && blocks(message).some(b=>identity(message,b)===key); }
+function stillValid(chat,message,block,key,inactive=false) {
+    if(currentChat()!==chat||!ctx().chat.includes(message))return false;
+    const swipe=Number(key.slice(0,key.indexOf(':'))),active=(message.swipe_id??0)===swipe;
+    if(!active&&!inactive)return false;
+    const text=active?message.mes:message.swipes?.[swipe];if(typeof text!=='string')return false;
+    return parseBodyBlocks(text,settings.pattern,reasoningFormat()).some(b=>b.index===block.index&&b.prompt===block.prompt);
+}
 function generate(message,block,{automatic=false}={}) {
     const key=identity(message,block), chat=currentChat(), taskId=`${chat}:${ctx().chat.indexOf(message)}:${key}`;
     if(running.has(taskId))return;
@@ -85,17 +92,20 @@ function generate(message,block,{automatic=false}={}) {
     request.vibes=selectVibes(settings.profiles[settings.active],settings.vibeLibrary);
     const folder=validateFolder(settings.folder);
     attempted.add(taskId);
-    const task={status:'排队中',message,key,chat}; running.set(taskId,task); renderAll();
+    const task={status:'排队中',message,key,chat,swipe:message.swipe_id??0};
+    const waiting=running.size>0||settings.cloudQueue;running.set(taskId,task);renderAll();
+    if(waiting)toastr.info(`第 ${ctx().chat.indexOf(message)+1} 楼 · 第 ${task.swipe+1} 个 swipe 的插图已加入队列`,'喵喵文生图');
     queue=queue.then(async()=>{
-        if(!settings.enabled || !stillValid(chat,message,block,key))return;
+        if(task.cancelled||!settings.enabled || !stillValid(chat,message,block,key))return;
         if(automatic && !canAutoGenerate(ctx().chat,message,settings.mode,streamActive))return;
         task.status='生成中'; renderAll();
-        const data=await requestImage(request,task,()=>stillValid(chat,message,block,key)&&(!automatic||canAutoGenerate(ctx().chat,message,settings.mode,streamActive)));
+        const data=await requestImage(request,task,()=>!task.cancelled&&stillValid(chat,message,block,key)&&(!automatic||canAutoGenerate(ctx().chat,message,settings.mode,streamActive)));
         const url=await saveBase64AsFile(data,folder,`miao-${Date.now()}-${crypto.randomUUID()}`,'png');
-        // Do not attach stale results to another chat or edited/swiped messages.
-        if(!stillValid(chat,message,block,key)) { toastr.info('图片已保存，但原消息已切换或修改：'+url); return; }
-        message.extra??={}; message.extra[ID]??={}; message.extra[ID][key]=appendImageVersion(message.extra[ID][key],{url,request,created:Date.now()});
+        // Switching swipes does not invalidate an image already being generated.
+        if(task.cancelled||!stillValid(chat,message,block,key,true)) { toastr.info('图片已保存，但原消息已删除或修改：'+url); return; }
+        writeSwipeImage(message,task.swipe,`${block.index}:${block.prompt}`,appendImageVersion(state(message,key),{url,request,created:Date.now()}));
         await ctx().saveChat();
+        toastr.success(`插图已保存到第 ${ctx().chat.indexOf(message)+1} 楼 · 第 ${task.swipe+1} 个 swipe`,'喵喵文生图');
     }).catch(async error=>{
         task.status='失败，点击重试'; task.error=String(error.message||error);
         await errorPopup(error);
@@ -124,6 +134,7 @@ function makeCard(message,block) {
             const switchTo=async offset=>{
                 // Cards may outlive their captured record after chat state updates.
                 const live=state(message,key);if(!live||!selectImageVersion(live,offset))return;
+                writeSwipeImage(message,message.swipe_id??0,`${block.index}:${block.prompt}`,live);
                 const replacement=makeCard(message,block);replacement.querySelector('.miao-image-tools').hidden=false;
                 card.replaceWith(replacement);await ctx().saveChat();
             };
@@ -134,10 +145,10 @@ function makeCard(message,block) {
         const operations=el('div',undefined,'miao-image-operations');actions.append(operations);
         button('提示词',()=>showPrompt(current.request?.prompt||block.prompt,current.request?.vibes),operations).setAttribute('aria-label','查看提示词');
         button('下载',()=>downloadImage(current.url),operations).setAttribute('aria-label','下载图片');button('放大',()=>openImage(current.url),operations).setAttribute('aria-label','放大查看');
-    }else{
+    }else if(!task){
         actions.hidden=false;button(task?.status||'生成插图',()=>generate(message,block)).disabled=!!task;button('查看提示词',()=>showPrompt(block.prompt));
     }
-    if(task)card.append(el('span',task.status,'miao-image-progress'));
+    if(task){const progress=el('span',task.status,'miao-image-progress');progress.setAttribute('role','status');card.append(progress);}
     card.dataset.status=String(selected)+':'+versions.map(v=>v.url+':'+!!v.deleted).join('|')+':'+(task?.status||'');
     card.append(actions);
     return card;
@@ -233,6 +244,8 @@ async function queueStatus() {
 }
 async function requestImage(request,task,canContinue) {
     const generate=async()=>{
+        if(task){task.status='生成中';renderAll();}
+        toastr.info(task?`正在生成第 ${ctx().chat.indexOf(task.message)+1} 楼 · 第 ${task.swipe+1} 个 swipe 的插图`:'正在生成测试图片…','喵喵文生图');
         if(request.vibes?.length)return direct.generate(request);
         const response=await fetch('/api/novelai/generate-image',{method:'POST',headers:ctx().getRequestHeaders(),body:JSON.stringify(request),signal:AbortSignal.timeout(180000)});
         if(!response.ok)throw new Error(`NAI HTTP ${response.status}\n${(await response.text()).slice(0,1600)}`);
@@ -299,9 +312,10 @@ async function deleteImages(folder,names) {
         catch(error){failure=error;break;}
     }
     const paths=new Set(removed.map(name=>`user/images/${folder}/${name}`));let changed=false;
-    for(const message of ctx().chat)for(const record of Object.values(message.extra?.[ID]||{})) {
+    for(const message of ctx().chat)for(const {swipe,slot,record} of swipeImageRecords(message)) {
         for(const version of imageVersions(record)){if(paths.has(String(version.url).replace(/^\//,''))){version.deleted=true;changed=true;}}
         if(paths.has(String(record.url).replace(/^\//,''))){record.deleted=true;changed=true;}
+        writeSwipeImage(message,swipe,slot,record);
     }
     if(changed)await ctx().saveChat();renderAll();
     toastr.success(`已清理 ${removed.length} 张图片`);
@@ -355,12 +369,18 @@ function scheduleRender(automatic=false) {
 }
 async function init() {
     mountMenu();const c=ctx();save();
+    let migrated=false;for(const message of c.chat)migrated=migrateSwipeImages(message)||migrated;if(migrated)await c.saveChat();
     document.addEventListener('click',event=>{
         if(event.target.closest?.('.miao-image-card>img,.miao-image-tools'))return;
         imageToolsEpoch++;
         document.querySelectorAll('.miao-image-tools').forEach(tools=>{tools.hidden=true;});
     });
     for(const name of ['CHARACTER_MESSAGE_RENDERED','MESSAGE_UPDATED','MESSAGE_SWIPED','MESSAGE_EDITED'])if(c.eventTypes[name])c.eventSource.on(c.eventTypes[name],()=>scheduleRender(false));
+    if(c.eventTypes.MESSAGE_SWIPE_DELETED)c.eventSource.on(c.eventTypes.MESSAGE_SWIPE_DELETED,async({messageId,swipeId})=>{
+        const message=ctx().chat[messageId];if(!message)return;
+        for(const task of running.values())if(task.message===message&&task.swipe>=swipeId)task.cancelled=true;
+        removeSwipeImages(message,swipeId);await ctx().saveChat();scheduleRender(false);
+    });
     c.eventSource.on(c.eventTypes.CHAT_CHANGED,()=>{streamActive=false;generationChat=null;scheduleRender(true);});
     c.eventSource.on(c.eventTypes.GENERATION_STARTED,()=>{streamActive=true;generationChat=currentChat();});
     c.eventSource.on(c.eventTypes.GENERATION_ENDED,()=>{const same=generationChat===currentChat();streamActive=false;generationChat=null;renderAll();if(same)autoLatest();});
