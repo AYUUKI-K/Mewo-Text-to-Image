@@ -9,7 +9,7 @@ import { getScriptsByType, saveScriptsByType, SCRIPT_TYPES } from '../../regex/e
 import { createSettingsPanel } from './ui.js';
 import {createDirectClient} from './direct-client.js';
 import {createKeyVault} from './direct-key.js';
-import {appendImageVersion,imageVersions} from './image-history.js';
+import {appendImageVersion,imageVersions,selectImageVersion} from './image-history.js';
 import {selectVibes} from './vibe.js';
 import { defaults, parseBodyBlocks, maskReasoning, renderedBlockRange, buildRequest, latestImageMessage, canAutoGenerate, validateFolder, imageDay, imageURL, normalizeProfile, delimiterPattern } from './core.js';
 
@@ -105,7 +105,7 @@ function makeCard(message,block) {
     const task=[...running.values()].find(t=>t.chat===currentChat() && t.message===message && t.key===key);
     const versions=imageVersions(record),wanted=Math.min(record?.selected??versions.length-1,versions.length-1),selected=versions[wanted]?.deleted?versions.findLastIndex(v=>!v.deleted):wanted,current=versions[selected];
     const actions=el('div',undefined,'miao-image-tools');actions.hidden=true;
-    const button=(label,fn)=>{const b=el('button',label,'miao-button');b.type='button';b.addEventListener('click',guard(fn));actions.append(b);return b;};
+    const button=(label,fn,parent=actions)=>{const b=el('button',label,'miao-button');b.type='button';b.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();guard(fn)();});parent.append(b);return b;};
     if(current?.url&&!current.deleted){
         const image=el('img');image.src=current.url;image.alt='生成的剧情插图';image.loading='lazy';image.tabIndex=0;image.setAttribute('role','button');image.setAttribute('aria-label','单击图片显示选项，双击重新生成');
         let clickTimer,lastTap=0;
@@ -116,11 +116,20 @@ function makeCard(message,block) {
         image.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();actions.hidden=!actions.hidden;}});
         card.append(image);
         if(versions.length>1){
-            const switchTo=async index=>{record.selected=(index+versions.length)%versions.length;const item=versions[record.selected];Object.assign(record,{url:item.url,request:item.request,created:item.created,deleted:item.deleted||false});await ctx().saveChat();card.dataset.status='';renderAll();const replacement=[...document.querySelectorAll('.miao-image-card')].find(n=>n.dataset.miaoKey===key&&n.closest('.mes')?.getAttribute('mesid')===String(ctx().chat.indexOf(message)));if(replacement)replacement.querySelector('.miao-image-tools').hidden=false;};
-            button('上一张',()=>switchTo(selected-1));actions.append(el('span',String(selected+1)+' / '+versions.length,'miao-version-count'));button('下一张',()=>switchTo(selected+1));
+            const navigation=el('nav',undefined,'miao-version-nav');navigation.setAttribute('aria-label','图片版本');actions.append(navigation);
+            const switchTo=async offset=>{
+                // Cards may outlive their captured record after chat state updates.
+                const live=state(message,key);if(!live||!selectImageVersion(live,offset))return;
+                const replacement=makeCard(message,block);replacement.querySelector('.miao-image-tools').hidden=false;
+                card.replaceWith(replacement);await ctx().saveChat();
+            };
+            const prev=button('‹',()=>switchTo(-1),navigation);prev.setAttribute('aria-label','上一张');prev.title='上一张';
+            const count=el('span',`${selected+1} / ${versions.length}`,'miao-version-count');count.setAttribute('aria-live','polite');navigation.append(count);
+            const next=button('›',()=>switchTo(1),navigation);next.setAttribute('aria-label','下一张');next.title='下一张';
         }
-        button('查看提示词',()=>showPrompt(current.request?.prompt||block.prompt,current.request?.vibes));
-        button('下载图片',()=>downloadImage(current.url));button('放大查看',()=>openImage(current.url));
+        const operations=el('div',undefined,'miao-image-operations');actions.append(operations);
+        button('提示词',()=>showPrompt(current.request?.prompt||block.prompt,current.request?.vibes),operations).setAttribute('aria-label','查看提示词');
+        button('下载',()=>downloadImage(current.url),operations).setAttribute('aria-label','下载图片');button('放大',()=>openImage(current.url),operations).setAttribute('aria-label','放大查看');
     }else{
         actions.hidden=false;button(task?.status||'生成插图',()=>generate(message,block)).disabled=!!task;button('查看提示词',()=>showPrompt(block.prompt));
     }
@@ -204,8 +213,7 @@ async function downloadImage(url,name='miao-image.png') {
 async function openImage(url,name='miao-image.png') {
     const view=el('div',undefined,'miao-image-viewer');
     const image=el('img');image.src=url;image.alt='图片预览';
-    const download=el('button','下载到设备','miao-button miao-primary');download.type='button';download.addEventListener('click',guard(()=>downloadImage(url,name)));
-    view.append(image,download);await showPopup(view,POPUP_TYPE.TEXT,'',{wide:true});
+    view.append(image);await showPopup(view,POPUP_TYPE.TEXT,'',{wide:true});
 }
 async function queueStatus() {
     const url=validateQueueURL(settings.queueUrl);
@@ -297,7 +305,7 @@ async function openSettings() {
             renderAll();if(action===true)autoLatest();
         },
         saveKey:async key=>{if(!key)throw new Error('请填写 Key');const hash=await fingerprintKey(key);await writeSecret(SECRET_KEYS.NOVEL,key);settings.keyHash=hash;save();await directVault.set(key,settings.rememberDirectKey);toastr.success('NAI Key 已保存，Vibe 可直接使用');},
-        testImage,installDefaults,installWorld,installRegex,listImages,deleteImages,changeFolder,saveCapture,queueStatus,openImage,
+        testImage,installDefaults,installWorld,installRegex,listImages,deleteImages,changeFolder,saveCapture,queueStatus,openImage,downloadImage,
         listVibes:()=>direct.list(),importVibeFile,
         directKeyStatus:async()=>{const key=await directVault.get();return Boolean(key&&settings.keyHash&&await fingerprintKey(key)===settings.keyHash);},clearDirectKey:()=>directVault.clear(),
         closeSettings:()=>settingsPopup?.completeAffirmative?settingsPopup.completeAffirmative():settingsPopup?.dlg.close(),
