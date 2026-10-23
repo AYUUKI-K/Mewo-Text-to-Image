@@ -33,6 +33,42 @@ export function parseBlocks(text, pattern = 'image###([\\s\\S]*?)###') {
     const regex = new RegExp(pattern, 'gi');
     return [...String(text).matchAll(regex)].filter(m => m[1]?.trim()).map((m, index) => ({index, raw:m[0], prompt:m[1].trim(), start:m.index}));
 }
+// Mask rather than remove: offsets still point into the original message.
+export function maskReasoning(text, configured={}) {
+    let value=String(text??'');
+    const pairs=[['<think>','</think>'],['<thinking>','</thinking>'],['<analysis>','</analysis>'],['<reasoning>','</reasoning>']];
+    if(configured.prefix?.trim())pairs.unshift([configured.prefix,configured.suffix||'']);
+    const ranges=[];
+    for(const [prefix,suffix] of pairs){
+        let cursor=0;
+        while(cursor<value.length){
+            const start=value.indexOf(prefix,cursor);if(start<0)break;
+            let end=value.length;
+            if(suffix){
+                let position=start+prefix.length,depth=1;
+                while(position<value.length){
+                    const close=value.indexOf(suffix,position),nested=prefix===suffix?-1:value.indexOf(prefix,position);
+                    if(close<0)break;
+                    if(nested>=0&&nested<close){depth++;position=nested+prefix.length;}
+                    else{position=close+suffix.length;if(--depth===0){end=position;break;}}
+                }
+            }
+            ranges.push([start,end]);cursor=end;
+        }
+    }
+    for(const [start,end] of ranges)value=value.slice(0,start)+value.slice(start,end).replace(/[^\r\n]/g,' ')+value.slice(end);
+    return value;
+}
+export function pageItems(items,page=0,size=24){
+    const pages=Math.max(1,Math.ceil(items.length/size)),current=Math.max(0,Math.min(pages-1,page));
+    return {items:items.slice(current*size,(current+1)*size),page:current,pages,total:items.length};
+}
+export function parseBodyBlocks(text,pattern,format={}){
+    const original=String(text??''),previous=parseBlocks(original,pattern);
+    return parseBlocks(maskReasoning(original,format),pattern)
+        .filter(b=>original.slice(b.start,b.start+b.raw.length)===b.raw)
+        .map(b=>({...b,index:previous.find(old=>old.start===b.start)?.index??b.index}));
+}
 export const sizePresets=[{name:'方图',width:1024,height:1024},{name:'竖图',width:832,height:1216},{name:'横图',width:1216,height:832}];
 export function delimiterPattern(start,end) {
     if(typeof start!=='string'||typeof end!=='string'||!start||!end)throw new Error('起始标签和结束标签都要填写喵');

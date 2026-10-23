@@ -6,7 +6,7 @@ import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
 import * as wi from '../../../world-info.js';
 import { getScriptsByType, saveScriptsByType, SCRIPT_TYPES } from '../../regex/engine.js';
 import { createSettingsPanel } from './ui.js';
-import { defaults, parseBlocks, buildRequest, latestImageMessage, canAutoGenerate, validateFolder, imageDay, imageURL, normalizeProfile, delimiterPattern } from './core.js';
+import { defaults, parseBodyBlocks, maskReasoning, buildRequest, latestImageMessage, canAutoGenerate, validateFolder, imageDay, imageURL, normalizeProfile, delimiterPattern } from './core.js';
 
 const ID='miao_nai_image';
 const base=new URL('.',import.meta.url);
@@ -33,11 +33,12 @@ let queue=Promise.resolve(), streamActive=false, timer, autoScheduled=false, gen
 const save=()=>ctx().saveSettingsDebounced();
 function el(tag,text,cls) { const n=document.createElement(tag); if(text!==undefined)n.textContent=text; if(cls)n.className=cls; return n; }
 async function errorPopup(error) {
-    const box=el('div'); box.append(el('h3','喵喵文生图：生成失败'),el('pre',String(error.message||error)));
+    const box=el('div',undefined,'miao-prompt-view'); box.append(el('h3','喵喵文生图：操作失败'),el('pre',String(error.message||error)));
     await callGenericPopup(box,POPUP_TYPE.TEXT);
 }
 const guard=fn=>(...args)=>Promise.resolve().then(()=>fn(...args)).catch(errorPopup);
-function blocks(message) { return parseBlocks(message.mes,settings.pattern); }
+function reasoningFormat(){const r=ctx().powerUserSettings?.reasoning||{};return {prefix:ctx().substituteParams?.(r.prefix||'')??r.prefix,suffix:ctx().substituteParams?.(r.suffix||'')??r.suffix};}
+function blocks(message) { return parseBodyBlocks(message.mes,settings.pattern,reasoningFormat()); }
 function identity(message,block) { return `${message.swipe_id??0}:${block.index}:${block.prompt}`; }
 function state(message,key) { return message.extra?.[ID]?.[key]; }
 function currentChat() { return String(ctx().getCurrentChatId()); }
@@ -46,6 +47,7 @@ function generate(message,block,{automatic=false}={}) {
     const key=identity(message,block), chat=currentChat(), taskId=`${chat}:${ctx().chat.indexOf(message)}:${key}`;
     if(running.has(taskId))return;
     const request=buildRequest(settings.profiles[settings.active],block.prompt);
+    request.vibes=structuredClone(settings.profiles[settings.active].vibes||[]);
     const folder=validateFolder(settings.folder);
     attempted.add(taskId);
     const task={status:'排队中',message,key,chat}; running.set(taskId,task); renderAll();
@@ -80,14 +82,15 @@ function makeCard(message,block) {
     const button=iconButton(task?.status || (record?'重新生成':'生成插图'),task?'spinner':record?'rotate-right':'image',()=>generate(message,block));button.disabled=!!task;
     if(task)button.classList.add('miao-spinning');
     if(record?.url&&!record.deleted)iconButton('下载图片','download',()=>downloadImage(record.url));
-    iconButton('查看提示词','sliders',()=>{const pre=el('pre',block.prompt);pre.style.whiteSpace='pre-wrap';return callGenericPopup(pre,POPUP_TYPE.TEXT);});
+    iconButton('查看提示词','sliders',()=>showPrompt(block.prompt));
     card.append(actions);
     return card;
 }
 function replaceLiteral(root,literal,node) {
     const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);const nodes=[];let text='',n;
-    while((n=walker.nextNode())) { if(n.parentElement.closest('.miao-image-card'))continue; nodes.push({n,start:text.length});text+=n.textContent; }
-    const start=text.indexOf(literal);if(start<0)return false;const end=start+literal.length;
+    const customTag=reasoningFormat().prefix?.match(/^<([\w-]+)>$/)?.[1]?.toLowerCase();
+    while((n=walker.nextNode())) { if(n.parentElement.closest('.miao-image-card,.mes_reasoning,.mes_reasoning_details,think,thinking,analysis,reasoning')||(customTag&&n.parentElement.closest(customTag)))continue; nodes.push({n,start:text.length});text+=n.textContent; }
+    const start=maskReasoning(text,reasoningFormat()).indexOf(literal);if(start<0)return false;const end=start+literal.length;
     const a=nodes.find(x=>x.start+x.n.length>start),b=nodes.find(x=>x.start+x.n.length>=end);
     if(!a||!b)return false;
     const range=document.createRange();range.setStart(a.n,start-a.start);range.setEnd(b.n,end-b.start);range.deleteContents();range.insertNode(node);return true;
@@ -139,6 +142,7 @@ function applyTheme() {
 }
 async function testImage() {
     const request=buildRequest(settings.profiles[settings.active],'1girl, adult woman, white dress, flower garden, sunlight');
+    request.vibes=structuredClone(settings.profiles[settings.active].vibes||[]);
     const data=await requestImage(request);
     const url=await saveBase64AsFile(data,validateFolder(settings.folder),`test-${Date.now()}-${crypto.randomUUID()}`,'png');
     await openImage(url);
@@ -165,7 +169,8 @@ async function queueStatus() {
 }
 async function requestImage(request,task,canContinue) {
     const generate=async()=>{
-        const response=await fetch('/api/novelai/generate-image',{method:'POST',headers:ctx().getRequestHeaders(),body:JSON.stringify(request),signal:AbortSignal.timeout(180000)});
+        if(request.vibes?.length)await vibeAPI('/health',undefined);
+        const response=await fetch(request.vibes?.length?'/api/plugins/miao-nai-image/generate-image':'/api/novelai/generate-image',{method:'POST',headers:ctx().getRequestHeaders(),body:JSON.stringify(request),signal:AbortSignal.timeout(180000)});
         if(!response.ok)throw new Error(`NAI HTTP ${response.status}\n${(await response.text()).slice(0,1600)}`);
         const data=(await response.text()).trim();
         if(!data||data.startsWith('{')||data.startsWith('<'))throw new Error('酒馆生图接口未返回有效图片');
@@ -175,6 +180,32 @@ async function requestImage(request,task,canContinue) {
         onStatus:status=>{if(task){task.status=status;renderAll();}},
         onReleaseError:()=>toastr.info('队列连接中断，占用将自动到期释放')});
     return generate();
+}
+const translations=new Map();
+async function showPrompt(prompt){
+    const view=el('section',undefined,'miao-prompt-view');view.append(el('h3','绘图提示词'),el('pre',prompt));
+    const button=el('button','Google 翻译为中文','miao-button');button.type='button';
+    const note=el('p','点击后通过酒馆的 Google 翻译接口发送这段提示词。译文仅供查看，不会改动生图内容。','miao-muted');
+    const translated=el('pre');translated.hidden=true;translated.setAttribute('aria-live','polite');
+    button.onclick=guard(async()=>{button.disabled=true;button.textContent='翻译中…';try{
+        let result=translations.get(prompt);
+        if(!result){const response=await fetch('/api/translate/google',{method:'POST',headers:ctx().getRequestHeaders(),body:JSON.stringify({text:prompt,lang:'zh-CN'}),signal:AbortSignal.timeout(45000)});if(!response.ok)throw Error(`Google 翻译失败：HTTP ${response.status}，请检查酒馆服务器能否连接 Google。`);result=await response.text();if(!result.trim())throw Error('Google 未返回译文');if(translations.size>=50)translations.delete(translations.keys().next().value);translations.set(prompt,result);}
+        translated.textContent=result;translated.hidden=false;
+    }finally{button.disabled=false;button.textContent='Google 翻译为中文';}});
+    view.append(button,note,translated);await callGenericPopup(view,POPUP_TYPE.TEXT,'',{wide:true,onOpen:popup=>popup.dlg.classList.add('miao-content-dialog')});
+}
+async function vibeAPI(endpoint,body){
+    const response=await fetch('/api/plugins/miao-nai-image'+endpoint,{method:body===undefined?'GET':'POST',headers:ctx().getRequestHeaders(),...(body===undefined?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(180000)});
+    if(response.status===404)throw Error('尚未安装喵喵 Vibe 服务端插件。请按仓库 VIBE.md 安装到云端酒馆 plugins 目录并重启；普通生图无需安装。');
+    const data=await response.json();if(!response.ok)throw Error(data.error||`Vibe HTTP ${response.status}`);return data;
+}
+async function importVibeFile(file){
+    if(file.size>18*1024*1024)throw Error('文件不能超过 18 MB');
+    const name=file.name.replace(/\.[^.]+$/,'');
+    if(/\.(naiv4vibe|naiv4vibebundle|json)$/i.test(file.name))return vibeAPI('/vibes/import',{data:JSON.parse(await file.text()),name});
+    if(!['image/png','image/jpeg','image/webp'].includes(file.type))throw Error('请选择 .naiv4vibe、.naiv4vibeBundle 或 PNG/JPEG/WebP');
+    const image=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(Error('图片读取失败'));reader.readAsDataURL(file);});
+    return vibeAPI('/vibes/import',{image,name});
 }
 function changeFolder(value) {
     settings.folder=validateFolder(value);
@@ -198,7 +229,8 @@ async function deleteImages(folder,names) {
     if(names.some(name=>!allowed.has(name)))throw new Error('清理列表已变化，请刷新后重试');
     const question=el('div');question.append(el('h3',`清理 ${names.length} 张生成图片？`),el('p',`服务器目录：${folder}`),el('p','这会永久删除服务器上的文件，引用这些图片的聊天将无法再显示原图。'));
     const previews=el('div',undefined,'miao-history-grid');
-    for(const name of names){const image=el('img');image.src=imageURL(folder,name);image.alt=name;image.loading='lazy';previews.append(image);}
+    for(const name of names.slice(0,24)){const image=el('img');image.src=imageURL(folder,name);image.alt=name;image.loading='lazy';previews.append(image);}
+    if(names.length>24)question.append(el('p',`共 ${names.length} 张，下方预览前 24 张。`));
     question.append(previews);
     if(!await callGenericPopup(question,POPUP_TYPE.CONFIRM))return;
     const removed=[];let failure;
@@ -222,7 +254,10 @@ async function openSettings() {
             renderAll();if(action===true)autoLatest();
         },
         saveKey:async key=>{if(!key)throw new Error('请填写 Key');const hash=await fingerprintKey(key);await writeSecret(SECRET_KEYS.NOVEL,key);settings.keyHash=hash;save();toastr.success('NAI Key 已保存');},
-        testImage,installDefaults,installWorld,installRegex,listImages,deleteImages,changeFolder,saveCapture,queueStatus,openImage});
+        testImage,installDefaults,installWorld,installRegex,listImages,deleteImages,changeFolder,saveCapture,queueStatus,openImage,
+        listVibes:()=>vibeAPI('/vibes'),importVibeFile,
+        encodeVibe:async body=>{await vibeAPI('/health');const generate=()=>vibeAPI('/vibes/encode',body);return settings.cloudQueue?runWithQueue({url:settings.queueUrl,keyHash:settings.keyHash,generate}):generate();},renameVibe:body=>vibeAPI('/vibes/rename',body),
+        deleteVibe:async id=>{if(!await callGenericPopup('删除这个 Vibe？所有配置中的引用也会移除。',POPUP_TYPE.CONFIRM))return false;await vibeAPI('/vibes/delete',{id});for(const p of settings.profiles)p.vibes=(p.vibes||[]).filter(v=>v.id!==id);save();return true;}});
     settingsHost=panel;
     await callGenericPopup(panel,POPUP_TYPE.TEXT,'',{wide:true,okButton:'完成',onOpen:popup=>popup.dlg.classList.add('miao-settings-dialog')});
     settingsHost=null;

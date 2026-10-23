@@ -1,5 +1,6 @@
 {
   "type": "module",
+  "main": "server-plugin/index.mjs",
   "scripts": {
     "test": "node --test tests/*.test.js"
   }
