@@ -10,6 +10,7 @@ import { createSettingsPanel } from './ui.js';
 import {createDirectClient} from './direct-client.js';
 import {createKeyVault} from './direct-key.js';
 import {appendImageVersion,imageVersions} from './image-history.js';
+import {selectVibes} from './vibe.js';
 import { defaults, parseBodyBlocks, maskReasoning, buildRequest, latestImageMessage, canAutoGenerate, validateFolder, imageDay, imageURL, normalizeProfile, delimiterPattern } from './core.js';
 
 const ID='miao_nai_image';
@@ -76,7 +77,7 @@ function generate(message,block,{automatic=false}={}) {
     const key=identity(message,block), chat=currentChat(), taskId=`${chat}:${ctx().chat.indexOf(message)}:${key}`;
     if(running.has(taskId))return;
     const request=buildRequest(settings.profiles[settings.active],block.prompt);
-    request.vibes=structuredClone(settings.profiles[settings.active].vibes||[]);
+    request.vibes=selectVibes(settings.profiles[settings.active],settings.vibeLibrary);
     const folder=validateFolder(settings.folder);
     attempted.add(taskId);
     const task={status:'排队中',message,key,chat}; running.set(taskId,task); renderAll();
@@ -117,7 +118,7 @@ function makeCard(message,block) {
             const switchTo=async index=>{record.selected=(index+versions.length)%versions.length;const item=versions[record.selected];Object.assign(record,{url:item.url,request:item.request,created:item.created,deleted:item.deleted||false});await ctx().saveChat();card.dataset.status='';renderAll();const replacement=[...document.querySelectorAll('.miao-image-card')].find(n=>n.dataset.miaoKey===key&&n.closest('.mes')?.getAttribute('mesid')===String(ctx().chat.indexOf(message)));if(replacement)replacement.querySelector('.miao-image-tools').hidden=false;};
             button('上一张',()=>switchTo(selected-1));actions.append(el('span',String(selected+1)+' / '+versions.length,'miao-version-count'));button('下一张',()=>switchTo(selected+1));
         }
-        button('查看提示词',()=>showPrompt(current.request?.prompt||block.prompt));
+        button('查看提示词',()=>showPrompt(current.request?.prompt||block.prompt,current.request?.vibes));
         button('下载图片',()=>downloadImage(current.url));button('放大查看',()=>openImage(current.url));
     }else{
         actions.hidden=false;button(task?.status||'生成插图',()=>generate(message,block)).disabled=!!task;button('查看提示词',()=>showPrompt(block.prompt));
@@ -183,7 +184,7 @@ function applyTheme() {
 }
 async function testImage() {
     const request=buildRequest(settings.profiles[settings.active],'1girl, adult woman, white dress, flower garden, sunlight');
-    request.vibes=structuredClone(settings.profiles[settings.active].vibes||[]);
+    request.vibes=selectVibes(settings.profiles[settings.active],settings.vibeLibrary);
     const data=await requestImage(request);
     const url=await saveBase64AsFile(data,validateFolder(settings.folder),`test-${Date.now()}-${crypto.randomUUID()}`,'png');
     await openImage(url);
@@ -223,8 +224,9 @@ async function requestImage(request,task,canContinue) {
     return generate();
 }
 const translations=new Map();
-async function showPrompt(prompt){
+async function showPrompt(prompt,vibes=[]){
     const view=el('section',undefined,'miao-prompt-view');view.append(el('h3','绘图提示词'),el('pre',prompt));
+    if(vibes.length)view.append(el('p','本张 Vibe：'+vibes.map(v=>v.name||v.id).join('、'),'miao-muted'));
     const button=el('button','Google 翻译为中文','miao-button');button.type='button';
     const note=el('p','点击后通过酒馆的 Google 翻译接口发送这段提示词。译文仅供查看，不会改动生图内容。','miao-muted');
     const translated=el('pre');translated.hidden=true;translated.setAttribute('aria-live','polite');

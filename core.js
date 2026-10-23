@@ -1,4 +1,4 @@
-export const defaults = {name:'默认',positive:'best quality, masterpiece',negative:'lowres, bad anatomy, text, watermark',model:'nai-diffusion-4-5-full',sampler:'k_euler_ancestral',scheduler:'karras',width:512,height:512,steps:20,scale:5,seed:-1};
+export const defaults = {name:'默认',positive:'best quality, masterpiece',negative:'lowres, bad anatomy, text, watermark',model:'nai-diffusion-4-5-full',sampler:'k_euler_ancestral',scheduler:'karras',width:512,height:512,steps:20,scale:5,seed:-1,vibeMode:'multiple'};
 export function normalizeProfile(profile) {
     const merged={...defaults,...profile};
     merged.positive=[merged.positive,merged.artists].filter(v=>typeof v==='string'&&v.trim()).map(v=>v.trim()).join(',\n');

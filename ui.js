@@ -31,8 +31,8 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
             for(const item of items){
                 const row=node('div',undefined,'miao-vibe-choice'),label=node('label',undefined,'miao-switch-row'),check=node('input');check.type='checkbox';
                 const variants=item.variants.filter(v=>v.model===vibeModelKeys[p.model]);
-                let binding=(p.vibes||[]).find(v=>v.id===item.id);check.checked=!!binding;check.disabled=(!variants.length&&!binding)||(!binding&&(p.vibes||[]).length>=4);
-                check.onchange=()=>{p.vibes??=[];if(check.checked&&p.vibes.length>=4){check.checked=false;onError(Error('最多同时启用 4 个 Vibe'));return;}if(check.checked)p.vibes.push({id:item.id,key:variants[0].key,strength:0.6});else p.vibes=p.vibes.filter(v=>v.id!==item.id);save();profileVibes(parent,p);};
+                let binding=(p.vibes||[]).find(v=>v.id===item.id);check.checked=!!binding;check.disabled=(!variants.length&&!binding)||(!binding&&p.vibeMode!=='random'&&(p.vibes||[]).length>=4);
+                check.onchange=()=>{p.vibes??=[];if(check.checked&&p.vibeMode!=='random'&&p.vibes.length>=4){check.checked=false;onError(Error('最多同时启用 4 个 Vibe'));return;}if(check.checked)p.vibes.push({id:item.id,key:variants[0].key,strength:0.6});else p.vibes=p.vibes.filter(v=>v.id!==item.id);save();profileVibes(parent,p);};
                 label.append(node('span',item.name),check);row.append(label);
                 if(binding){
                     const grid=node('div',undefined,'miao-grid');row.append(grid);
@@ -117,7 +117,11 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
             for(const preset of sizePresets){const b=action(sizes,preset.name,()=>{p.width=preset.width;p.height=preset.height;save();render();});b.append(node('small',`${preset.width}×${preset.height}`));b.classList.add('miao-size-preset');b.dataset.selected=String(p.width===preset.width&&p.height===preset.height);b.setAttribute('aria-pressed',b.dataset.selected);}
             const grid=node('div',undefined,'miao-grid');params.append(grid);
             for(const [key,label,type] of [['width','宽度','number'],['height','高度','number'],['steps','步数','number'],['scale','Guidance','number'],['seed','种子','number'],['sampler','采样器','text'],['scheduler','噪声表','text']]){const choices=key==='sampler'?[['k_euler_ancestral','Euler Ancestral'],['k_euler','Euler'],['k_dpmpp_2m','DPM++ 2M'],['k_dpmpp_2s_ancestral','DPM++ 2S Ancestral'],['k_dpmpp_sde','DPM++ SDE']]:key==='scheduler'?[['karras','Karras'],['native','Native'],['exponential','Exponential'],['polyexponential','Polyexponential']]:null;const options=choices&&!choices.some(([id])=>id===p[key])?[[p[key],p[key]],...choices]:choices;field(grid,label,p[key],v=>{p[key]=v;save();},{type,options,wide:['seed','sampler','scheduler'].includes(key)});}
-            const vibes=section(body,'本配置的 Vibe','最多同时启用 4 个 Vibe；选择、编码和强度随当前配置保存。不勾选时使用普通生图。');
+            const vibes=section(body,'本配置的 Vibe','随机 1 个：勾选任意数量作为候选，每次生图抽一个。多个：同时使用勾选项，最多 4 个。不勾选时使用普通生图。');
+            field(vibes,'使用方式',p.vibeMode??'multiple',value=>{
+                if(value==='multiple'&&(p.vibes||[]).length>4){render();throw Error('当前候选超过 4 个，请先减少勾选，再切换「多个」');}
+                p.vibeMode=value;save();render();
+            },{options:[['random','随机 1 个'],['multiple','多个（最多 4 个）']]});
             const choices=node('div',undefined,'miao-vibe-choices');vibes.append(choices);profileVibes(choices,p);
         } else if(activeTab==='vibes') {
             const manage=section(body,'Vibe 氛围列表','导入 NAI 的 .naiv4vibe / .naiv4vibeBundle，或上传图片后编码。启用哪些 Vibe，请到「配置」页勾选。');
@@ -205,7 +209,7 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
             action(controls,'清理选中日期',async()=>{if(!selected.size)throw new Error('请先勾选需要清理的日期');await deleteImages(selectedFolder,images.filter(i=>selected.has(i.day)).map(i=>i.name));await refresh();});
             refresh();
         }
-        const footer=node('footer',undefined,'miao-footer');footer.append(node('span','设置自动保存'),node('span','喵喵文生图 · 0.5.2'));root.append(footer);
+        const footer=node('footer',undefined,'miao-footer');footer.append(node('span','设置自动保存'),node('span','喵喵文生图 · 0.5.3'));root.append(footer);
     }
     render();return root;
 }

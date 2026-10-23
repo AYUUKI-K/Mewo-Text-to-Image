@@ -1,5 +1,15 @@
 // File schema and model encoding keys follow the official NovelAI image client.
 export const vibeModelKeys={'nai-diffusion-4-5-full':'v4-5full','nai-diffusion-4-5-curated':'v4-5curated','nai-diffusion-4-full':'v4full','nai-diffusion-4-curated-preview':'v4curated'};
+// Resolve once before queueing. Each image keeps its own independent selection.
+export function selectVibes(profile,library=[],random=Math.random){
+    const bindings=profile.vibes??[];
+    if(!Array.isArray(bindings))throw Error('Vibe 列表格式错误');
+    const mode=profile.vibeMode??'multiple';
+    if(!['random','multiple'].includes(mode))throw Error('Vibe 使用方式无效');
+    if(mode==='multiple'&&bindings.length>4)throw Error('最多同时启用 4 个 Vibe，请减少勾选或切换「随机 1 个」');
+    const chosen=mode==='random'&&bindings.length?[bindings[Math.floor(random()*bindings.length)]]:bindings;
+    return structuredClone(chosen).map(binding=>({...binding,name:library.find(item=>item.id===binding.id)?.name||binding.name||binding.id}));
+}
 export function importVibeData(data,fallbackName='Vibe'){
     const sources=Array.isArray(data?.vibes)?data.vibes:[data];
     if(!sources.length||sources.length>64)throw Error('一次最多导入 64 个 Vibe');
