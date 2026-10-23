@@ -139,7 +139,7 @@ function generate(message,block,{automatic=false}={}) {
             if(card)card.querySelector('.miao-image-tools').hidden=false;
         }
         imageSaves++;try{await ctx().saveChat();}finally{imageSaves--;}
-        toastr.success('插图已保存','喵喵文生图');
+        toastr.success('生图完成','喵喵文生图');
     }).catch(error=>{
         task.status='失败，点击重试'; task.error=String(error.message||error);
         void errorPopup(error).catch(()=>{});
@@ -351,7 +351,7 @@ function saveDownload(blob,name){
     const link=el('a');link.href=objectURL;link.download=name;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(objectURL),60000);
 }
 async function downloadImages(images){
-    await downloadImageSelection(images,{makeArchive:async()=>{if(!globalThis.JSZip)await import('/lib/jszip.min.js');return new globalThis.JSZip();},saveBlob:saveDownload});
+    await downloadImageSelection(images,{saveBlob:saveDownload});
 }
 async function openImage(url,name='miao-image.png') {
     const view=el('div',undefined,'miao-image-viewer');
@@ -452,7 +452,7 @@ async function openSettings() {
         },
         saveKey:async input=>{await saveCurrentKey({input,vault:directVault,settings,writeServerKey:key=>writeSecret(SECRET_KEYS.NOVEL,key),fingerprint:fingerprintKey,save});toastr.success(settings.rememberDirectKey?'NAI Key 已保存到酒馆和当前设备，刷新后可继续使用':'NAI Key 已保存，直连 Key 仅在当前页面暂存');},
         testImage,installDefaults,installWorld,installRegex,listImages,deleteImages,changeFolder,saveCapture,queueStatus,openImage,downloadImages,
-        checkUpdate:force=>updater.check(force),installUpdate:()=>updater.install(),refreshPage:()=>{if(streamActive||running.size||imageSaves)throw Error('请等当前回复、生图和聊天保存完成后再刷新');location.reload();},
+        checkUpdate:force=>updater.check(force),installUpdate:()=>updater.install(),refreshPage:()=>location.reload(),
         listVibes:()=>direct.list(),importVibeFile,
         directKeyStatus:async()=>{const status=await directVault.status(),key=await directVault.get();return {...status,ready:Boolean(key&&settings.keyHash&&await fingerprintKey(key)===settings.keyHash),serverSaved:!!settings.keyHash};},clearDirectKey:()=>directVault.clear(),
         closeSettings:()=>settingsPopup?.completeAffirmative?settingsPopup.completeAffirmative():settingsPopup?.dlg.close(),
@@ -467,7 +467,8 @@ function mountMenu() {
     document.getElementById('miao-nai-settings')?.remove();
     if(document.getElementById('miao-nai-menu'))return;
     const item=el('div',undefined,'list-group-item flex-container flexGap5');item.id='miao-nai-menu';item.setAttribute('role','button');item.tabIndex=0;
-    const icon=el('i',undefined,'fa-solid fa-image extensionsMenuExtensionButton');icon.setAttribute('aria-hidden','true');
+    const icon=el('span',undefined,'extensionsMenuExtensionButton');icon.setAttribute('aria-hidden','true');
+    icon.innerHTML='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11 3 3l6 4a13 13 0 0 1 6 0l6-4-1 8c3 9-19 14-16 0Z"/><path d="M8 12h.01M16 12h.01M11 15h2l-1 1-1-1ZM3 14l-2-1m2 4-2 1m20-4 2-1m-2 4 2 1"/></svg>';
     item.append(icon,el('span','喵喵文生图'));item.addEventListener('click',guard(openSettings));
     item.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();guard(openSettings)();}});
     const menu=document.getElementById('extensionsMenu');if(menu)menu.append(item);

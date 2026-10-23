@@ -1,10 +1,9 @@
-export async function downloadImageSelection(images,{makeArchive,saveBlob,fetchImpl=fetch}){
+// Use the same browser Blob download as an image in the chat floor.
+export async function downloadImageSelection(images,{saveBlob,fetchImpl=fetch}){
     if(!images.length)throw Error('请先勾选图片');
-    const archive=await makeArchive();
     for(const image of images){
-        const response=await fetchImpl(image.url);if(!response.ok)throw Error(`图片下载失败：${image.name}（HTTP ${response.status}）`);
-        archive.file(image.name,await response.blob());
+        const response=await fetchImpl(image.url);
+        if(!response.ok)throw Error(`图片下载失败：${image.name}（HTTP ${response.status}）`);
+        await saveBlob(await response.blob(),image.name);
     }
-    const blob=await archive.generateAsync({type:'blob',compression:'STORE'});
-    await saveBlob(blob,`miao-images-${images.length}.zip`);
 }
