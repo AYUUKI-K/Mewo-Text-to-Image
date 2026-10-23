@@ -1,5 +1,6 @@
 import {fingerprintKey,runWithQueue,validateQueueURL} from './cloud-queue.js';
 import { getContext, extension_settings } from '../../../extensions.js';
+import * as extensionAPI from '../../../extensions.js';
 import { saveBase64AsFile } from '../../../utils.js';
 import { writeSecret, SECRET_KEYS } from '../../../secrets.js';
 import { getCurrentUserHandle } from '../../../user.js';
@@ -11,11 +12,14 @@ import {createDirectClient} from './direct-client.js';
 import {createKeyVault} from './direct-key.js';
 import {appendImageVersion,imageVersions,selectImageVersion} from './image-history.js';
 import {selectVibes} from './vibe.js';
+import {createExtensionUpdater} from './updates.js';
+import {downloadImageSelection} from './downloads.js';
 import { defaults, parseBodyBlocks, maskReasoning, renderedBlockRange, buildRequest, latestImageMessage, canAutoGenerate, validateFolder, imageDay, imageURL, normalizeProfile, delimiterPattern } from './core.js';
 
 const ID='miao_nai_image';
 const base=new URL('.',import.meta.url);
 const ctx=()=>getContext();
+const updater=createExtensionUpdater({moduleURL:import.meta.url,getHeaders:()=>ctx().getRequestHeaders(),getGlobal:name=>extensionAPI.extensionTypes?.[name]==='global'});
 const settings=extension_settings[ID] ??= {enabled:true,stream:false,pattern:'image###([\\s\\S]*?)###',profiles:[{...defaults}],active:0,installed:false};
 settings.mode ??= settings.stream ? 'stream' : 'manual';
 settings.theme = 'auto';
@@ -36,7 +40,7 @@ settings.endTag ??= '###';
 settings.pattern = delimiterPattern(settings.startTag,settings.endTag);
 const running=new Map();
 const attempted=new Set();
-let queue=Promise.resolve(), streamActive=false, timer, autoScheduled=false, generationChat=null, settingsHost=null;
+let queue=Promise.resolve(), streamActive=false, timer, autoScheduled=false, generationChat=null, settingsHost=null,imageToolsEpoch=0;
 let settingsPopup=null;
 const save=()=>ctx().saveSettingsDebounced();
 const directUser=getCurrentUserHandle(),directVault=createKeyVault(directUser);
@@ -110,7 +114,7 @@ function makeCard(message,block) {
         const image=el('img');image.src=current.url;image.alt='生成的剧情插图';image.loading='lazy';image.tabIndex=0;image.setAttribute('role','button');image.setAttribute('aria-label','单击图片显示选项，双击重新生成');
         let clickTimer,lastTap=0;
         const reroll=()=>{clearTimeout(clickTimer);actions.hidden=true;if(!task)guard(()=>generate(message,block))();};
-        image.addEventListener('click',event=>{if(event.detail>1)return;clearTimeout(clickTimer);clickTimer=setTimeout(()=>{actions.hidden=!actions.hidden;},280);});
+        image.addEventListener('click',event=>{if(event.detail>1)return;clearTimeout(clickTimer);const epoch=imageToolsEpoch;clickTimer=setTimeout(()=>{if(epoch===imageToolsEpoch)actions.hidden=!actions.hidden;},280);});
         image.addEventListener('dblclick',event=>{event.preventDefault();reroll();});
         image.addEventListener('touchend',event=>{const now=Date.now();if(now-lastTap<300){event.preventDefault();reroll();lastTap=0;}else lastTap=now;},{passive:false});
         image.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();actions.hidden=!actions.hidden;}});
@@ -207,8 +211,14 @@ function saveCapture(start,end) {
 }
 async function downloadImage(url,name='miao-image.png') {
     const response=await fetch(url);if(!response.ok)throw new Error(`图片下载失败：HTTP ${response.status}`);
-    const objectURL=URL.createObjectURL(await response.blob());
+    saveDownload(await response.blob(),name);
+}
+function saveDownload(blob,name){
+    const objectURL=URL.createObjectURL(blob);
     const link=el('a');link.href=objectURL;link.download=name;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(objectURL),60000);
+}
+async function downloadImages(images){
+    await downloadImageSelection(images,{makeArchive:async()=>{if(!globalThis.JSZip)await import('/lib/jszip.min.js');return new globalThis.JSZip();},saveBlob:saveDownload});
 }
 async function openImage(url,name='miao-image.png') {
     const view=el('div',undefined,'miao-image-viewer');
@@ -305,7 +315,8 @@ async function openSettings() {
             renderAll();if(action===true)autoLatest();
         },
         saveKey:async key=>{if(!key)throw new Error('请填写 Key');const hash=await fingerprintKey(key);await writeSecret(SECRET_KEYS.NOVEL,key);settings.keyHash=hash;save();await directVault.set(key,settings.rememberDirectKey);toastr.success('NAI Key 已保存，Vibe 可直接使用');},
-        testImage,installDefaults,installWorld,installRegex,listImages,deleteImages,changeFolder,saveCapture,queueStatus,openImage,downloadImage,
+        testImage,installDefaults,installWorld,installRegex,listImages,deleteImages,changeFolder,saveCapture,queueStatus,openImage,downloadImages,
+        checkUpdate:force=>updater.check(force),installUpdate:()=>updater.install(),refreshPage:()=>{if(streamActive||running.size)throw Error('请等当前回复和生图完成后再刷新');location.reload();},
         listVibes:()=>direct.list(),importVibeFile,
         directKeyStatus:async()=>{const key=await directVault.get();return Boolean(key&&settings.keyHash&&await fingerprintKey(key)===settings.keyHash);},clearDirectKey:()=>directVault.clear(),
         closeSettings:()=>settingsPopup?.completeAffirmative?settingsPopup.completeAffirmative():settingsPopup?.dlg.close(),
@@ -344,6 +355,11 @@ function scheduleRender(automatic=false) {
 }
 async function init() {
     mountMenu();const c=ctx();save();
+    document.addEventListener('click',event=>{
+        if(event.target.closest?.('.miao-image-card>img,.miao-image-tools'))return;
+        imageToolsEpoch++;
+        document.querySelectorAll('.miao-image-tools').forEach(tools=>{tools.hidden=true;});
+    });
     for(const name of ['CHARACTER_MESSAGE_RENDERED','MESSAGE_UPDATED','MESSAGE_SWIPED','MESSAGE_EDITED'])if(c.eventTypes[name])c.eventSource.on(c.eventTypes[name],()=>scheduleRender(false));
     c.eventSource.on(c.eventTypes.CHAT_CHANGED,()=>{streamActive=false;generationChat=null;scheduleRender(true);});
     c.eventSource.on(c.eventTypes.GENERATION_STARTED,()=>{streamActive=true;generationChat=currentChat();});

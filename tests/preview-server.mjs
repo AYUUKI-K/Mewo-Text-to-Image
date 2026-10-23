@@ -25,7 +25,9 @@ import {getContext} from '/scripts/extensions.js';
 const p=window.preview;function draw(){document.getElementById('chat').innerHTML=p.chat.map((m,i)=>'<div class="mes" mesid="'+i+'"><div class="mes_text">'+m.mes+'</div></div>').join('');}draw();
 const nativeFetch=window.fetch.bind(window);window.fetch=async(url,options)=>{if(url==='/api/plugins/miao-nai-image/health')return Response.json({ready:true,vibe:true});if(url==='/api/plugins/miao-nai-image/vibes')return Response.json([{id:'00000000-0000-0000-0000-000000000001',name:'测试氛围',hasImage:true,variants:[{model:'v4-5full',key:'hash',information:0.7}]}]);if(url==='/api/translate/google'){p.translations.push(JSON.parse(options.body));return new Response('测试译文：阳光、花园、猫咪');}if(url==='/api/novelai/generate-image'||url==='/api/plugins/miao-nai-image/generate-image'){p.calls.push(JSON.parse(options.body));return new Response('aGVsbG8=');}if(url==='/api/images/list')return Response.json(p.files);if(url==='/api/images/delete'){const name=JSON.parse(options.body).path.split('/').at(-1);p.files=p.files.filter(f=>f!==name);return new Response('OK');}return nativeFetch(url,options);};
 const previousFetch=window.fetch;p.vibeFiles={};p.vibeFiles['/user/files/miao-vibe-00000000-0000-0000-0000-000000000001.json']={id:'00000000-0000-0000-0000-000000000001',name:'测试氛围',encodings:{'v4-5full':{hash:{encoding:'YWJj',params:{information_extracted:0.7}}}}};
+p.updates=[];
 window.fetch=async(url,options)=>{
+if(url==='/api/extensions/version'||url==='/api/extensions/update'){p.updates.push({url,...JSON.parse(options.body)});return Response.json({isUpToDate:false});}
 if(String(url).startsWith('/user/files/miao-vibe-'))return p.vibeFiles[url]?Response.json(p.vibeFiles[url]):new Response('missing',{status:404});
 if(url==='/api/files/upload'){const body=JSON.parse(options.body),path='/user/files/'+body.name;p.vibeFiles[path]=JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(body.data),c=>c.charCodeAt(0))));return Response.json({path});}
 if(url==='/api/files/delete'){delete p.vibeFiles[JSON.parse(options.body).path];return new Response('OK');}
@@ -55,15 +57,22 @@ let versionCard=lastRoot.querySelector('.miao-image-card');const secondVersionUR
 const liveRecord=p.chat.at(-1).extra.miao_nai_image;for(const key of Object.keys(liveRecord))liveRecord[key]=structuredClone(liveRecord[key]);
 versionCard.querySelector('[aria-label="上一张"]').click();await wait();versionCard=lastRoot.querySelector('.miao-image-card');check(versionCard.querySelector('.miao-version-count').textContent==='1 / 2'&&!versionCard.querySelector('.miao-image-tools').hidden&&versionCard.querySelector('img').src===firstVersionURL,'上一张即时切换图片地址，聊天记录替换后仍有效');
 versionCard.querySelector('[aria-label="下一张"]').click();await wait();versionCard=lastRoot.querySelector('.miao-image-card');check(versionCard.querySelector('.miao-version-count').textContent==='2 / 2'&&versionCard.querySelector('img').src===secondVersionURL,'下一张可切回第二版图片地址');
+document.getElementById('after-image').click();check(versionCard.querySelector('.miao-image-tools').hidden,'点击图片及操作栏以外的正文，自动收起按钮');
+versionCard.querySelector('img').dispatchEvent(new MouseEvent('click',{bubbles:true,detail:1}));document.getElementById('after-image').click();await new Promise(r=>setTimeout(r,320));check(versionCard.querySelector('.miao-image-tools').hidden,'外部点击会取消尚未显示的延迟操作栏');
+versionCard.querySelector('img').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
 versionCard.querySelector('[aria-label="放大查看"]').click();await wait();check(document.querySelector('.miao-image-viewer')&&!document.querySelector('.miao-image-viewer button'),'放大弹窗只有图片，不包含下载按钮');document.querySelector('dialog:last-of-type .popup-controls button').click();await wait();
 check(!document.querySelector('#extensions_settings .miao-settings'),'扩展列表没有设置面板');
 document.getElementById('miao-nai-menu').click();await wait();
 (document.querySelector('.miao-overview-row[aria-label="图片"]')||[...document.querySelectorAll('.miao-tabs button')].find(b=>b.textContent==='图片')).click();await wait();
 let tiles=[...document.querySelectorAll('.miao-history-tile')];check(tiles.length===24,'历史图片每页 24 张，缩略图独立勾选');
+check(!document.querySelector('.miao-header h2')&&document.querySelector('.miao-credit').textContent==='by 喵喵电波-NUE','子目录隐藏插件标题，保留作者署名');
+check(document.querySelector('.miao-update-status').textContent.includes('检测到当前有新版本'),'打开面板自动检测并显示更新按钮');document.querySelector('.miao-update-status button').click();await wait();check(document.querySelector('.miao-update-status').textContent.includes('更新已完成')&&p.updates.filter(c=>c.url.endsWith('/update')).length===1&&p.updates.every(c=>c.extensionName==='test'&&c.global===false),'更新仅操作当前插件，完成后提示手动刷新');
 const firstName=tiles[0].querySelector('img').alt;tiles[0].querySelector('input').click();
-const nativeAnchorClick=HTMLAnchorElement.prototype.click;const downloads=[];HTMLAnchorElement.prototype.click=function(){if(this.download)downloads.push(this.download);else nativeAnchorClick.call(this);};tiles[0].querySelector('.miao-history-download').click();await wait();HTMLAnchorElement.prototype.click=nativeAnchorClick;check(downloads[0]===firstName,'历史图片下载保留原始文件名');
 document.querySelector('.miao-pager button:last-child').click();await wait();tiles=[...document.querySelectorAll('.miao-history-tile')];const secondName=tiles[0].querySelector('img').alt;tiles[0].querySelector('input').click();check(document.querySelector('.miao-history-selection span').textContent==='已选 2 张','跨页勾选保留选择和数量');
-document.querySelector('.miao-history-selection button').click();await wait();check(!p.files.includes(firstName)&&!p.files.includes(secondName)&&p.files.length===52&&p.files.includes('unrelated.png'),'勾选删除只清理选中两张，不影响同日其他图或无关文件');
+const nativeAnchorClick=HTMLAnchorElement.prototype.click,nativeObjectURL=URL.createObjectURL;const downloads=[],blobs=[];HTMLAnchorElement.prototype.click=function(){if(this.download)downloads.push(this.download);else nativeAnchorClick.call(this);};URL.createObjectURL=function(blob){blobs.push(blob);return nativeObjectURL.call(URL,blob);};
+document.querySelector('.miao-history-selection button').click();await new Promise(r=>setTimeout(r,500));HTMLAnchorElement.prototype.click=nativeAnchorClick;URL.createObjectURL=nativeObjectURL;
+const archive=await JSZip.loadAsync(await blobs[0].arrayBuffer());check(downloads[0]==='miao-images-2.zip'&&Object.keys(archive.files).length===2&&archive.files[firstName]&&archive.files[secondName]&&!document.querySelector('.miao-history-download'),'勾选两张下载一个 ZIP，保留原名，缩略图不再显示下载按钮');
+document.querySelectorAll('.miao-history-selection button')[1].click();await wait();check(!p.files.includes(firstName)&&!p.files.includes(secondName)&&p.files.length===52&&p.files.includes('unrelated.png'),'勾选删除只清理选中两张，不影响同日其他图或无关文件');
 }catch(error){results.push(error.stack);}document.getElementById('report').textContent=results.join('\\n');
 if(!document.querySelector('.miao-settings'))document.getElementById('miao-nai-menu').click();
 </script>`;
@@ -82,7 +91,7 @@ else if(req.url==='/lib/jszip.min.js'&&process.env.MIAO_ST_ROOT)body=await readF
 else if(req.url==='/fixture-nai.zip'){body=fixtureZip();type='application/zip';}
 else if(req.url==='/scripts/world-info.js')body=`export const world_names=[],selected_world_info=[];export function onWorldInfoChange(){};export async function importWorldInfo(){}`;
 else if(req.url==='/scripts/extensions/regex/engine.js')body=`export const SCRIPT_TYPES={GLOBAL:0};export function getScriptsByType(){return [];}export async function saveScriptsByType(){}`;
-else if(req.url.startsWith(prefix)){const file=req.url.slice(prefix.length);if(!['index.js','core.js','vibe.js','direct-client.js','direct-key.js','image-history.js','cloud-queue.js','ui.js','style.css'].includes(file))throw Error('Not found');body=await readFile(new URL(file,root));if(file.endsWith('.css'))type='text/css';}
+else if(req.url.startsWith(prefix)){const file=req.url.slice(prefix.length);if(!['index.js','core.js','vibe.js','direct-client.js','direct-key.js','image-history.js','updates.js','downloads.js','cloud-queue.js','ui.js','style.css'].includes(file))throw Error('Not found');body=await readFile(new URL(file,root));if(file.endsWith('.css'))type='text/css';}
 else if(req.url.startsWith('/user/images/')){body=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aL1sAAAAASUVORK5CYII=','base64');type='image/png';}
 else{res.writeHead(404);res.end();return;}
 res.writeHead(200,{'Content-Type':type+'; charset=utf-8'});res.end(body);
