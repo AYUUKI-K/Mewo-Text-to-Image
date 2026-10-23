@@ -235,7 +235,7 @@ export function createSettingsPanel({settings,save,theme,onTheme,onChange,onErro
             action(controls,'清理选中日期',async()=>{if(!selected.size)throw new Error('请先勾选需要清理的日期');await deleteImages(selectedFolder,images.filter(i=>selected.has(i.day)).map(i=>i.name));await refresh();});
             refresh();
         }
-        const footer=node('footer',undefined,'miao-footer');footer.append(node('span','by 喵喵电波-NUE','miao-credit'),node('span','喵喵文生图 · 0.5.9'),updateBox);root.append(footer);
+        const footer=node('footer',undefined,'miao-footer');footer.append(node('span','by 喵喵电波-NUE','miao-credit'),node('span','喵喵文生图 · 0.5.10'),updateBox);root.append(footer);
     }
     render();checkLatest(false);return root;
 }

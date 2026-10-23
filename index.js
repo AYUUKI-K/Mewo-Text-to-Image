@@ -227,8 +227,7 @@ function insertionOffset(text,message,block) {
     if(before&&after&&before.end<=after.at)return offsets[before.end-1]+1;
     if(before)return offsets[before.end-1]+1;
     if(after)return offsets[after.at];
-    const full=sourceText(masked),ratio=full.length?prefix.length/full.length:0;
-    return offsets[Math.min(offsets.length-1,Math.max(0,Math.floor(ratio*offsets.length)))];
+    return null;
 }
 function insertAtTextOffset(root,nodes,offset,node) {
     if(!nodes.length)return false;
@@ -240,6 +239,18 @@ function replaceLiteral(root,literal,node,message,block) {
     const {nodes,text}=collectVisibleText(root);
     const visible=maskReasoning(text,reasoningFormat());
     let found=renderedBlockRange(visible,literal,settings.startTag,settings.endTag);
+    if(!found){
+        const decoded=document.createElement('textarea');decoded.innerHTML=literal;
+        found=renderedBlockRange(visible,decoded.value,settings.startTag,settings.endTag);
+    }
+    // Use the host formatter for entities, emphasis and other Markdown changes.
+    // Formatting a fragment cannot overwrite the original message text.
+    if(!found&&typeof ctx().messageFormatting==='function'){
+        const fragment=document.createElement('div');
+        fragment.innerHTML=ctx().messageFormatting(literal,message.name,!!message.is_system,!!message.is_user,ctx().chat.indexOf(message));
+        const formatted=collectVisibleText(fragment).text;
+        if(formatted.trim())found=renderedBlockRange(visible,formatted,settings.startTag,settings.endTag);
+    }
     if(found){
         const {start,end}=found,a=nodes.find(x=>x.start+x.n.length>start),b=nodes.find(x=>x.start+x.n.length>=end);
         if(a&&b){const range=document.createRange();range.setStart(a.n,start-a.start);range.setEnd(b.n,end-b.start);range.deleteContents();range.insertNode(node);return true;}
@@ -247,12 +258,12 @@ function replaceLiteral(root,literal,node,message,block) {
     // Regex or Markdown may remove the captured text from the rendered DOM.
     // Anchor the button between the nearest surviving text before and after it.
     const offset=insertionOffset(text,message,block);
-    const inserted=insertAtTextOffset(root,nodes,offset,node);
+    const inserted=offset!==null&&insertAtTextOffset(root,nodes,offset,node);
     if(!inserted){
         const cards=[...root.querySelectorAll('.miao-image-card')],index=block.bodyIndex;
         const previous=cards.filter(card=>Number(card.dataset.miaoBodyIndex)<index).sort((a,b)=>Number(b.dataset.miaoBodyIndex)-Number(a.dataset.miaoBodyIndex))[0];
         const next=cards.filter(card=>Number(card.dataset.miaoBodyIndex)>index).sort((a,b)=>Number(a.dataset.miaoBodyIndex)-Number(b.dataset.miaoBodyIndex))[0];
-        if(previous)previous.after(node);else if(next)next.before(node);else root.append(node);
+        if(previous)previous.after(node);else if(next)next.before(node);else return false;
     }
     return true;
 }
@@ -486,16 +497,26 @@ async function init() {
         imageToolsEpoch++;
         document.querySelectorAll('.miao-image-tools').forEach(tools=>{tools.hidden=true;});
     });
-    for(const name of ['CHARACTER_MESSAGE_RENDERED','MESSAGE_UPDATED','MESSAGE_SWIPED','MESSAGE_EDITED'])if(c.eventTypes[name])c.eventSource.on(c.eventTypes[name],()=>scheduleRender(false));
+    for(const name of ['CHARACTER_MESSAGE_RENDERED','MESSAGE_UPDATED','MESSAGE_SWIPED','MESSAGE_EDITED'])if(c.eventTypes[name])c.eventSource.on(c.eventTypes[name],messageId=>{
+        // Final rendering and swipe navigation must release any stale stream lock.
+        if(name==='MESSAGE_SWIPED'||name==='CHARACTER_MESSAGE_RENDERED'&&Number(messageId)===ctx().chat.length-1){streamActive=false;generationChat=null;}
+        scheduleRender(false);
+    });
     if(c.eventTypes.MESSAGE_SWIPE_DELETED)c.eventSource.on(c.eventTypes.MESSAGE_SWIPE_DELETED,async({messageId,swipeId})=>{
         const message=ctx().chat[messageId];if(!message)return;
         for(const task of running.values())if(liveMessage(task.message,task)===message&&task.swipe>=swipeId)task.cancelled=true;
         removeSwipeImages(message,swipeId);await ctx().saveChat();scheduleRender(false);
     });
     c.eventSource.on(c.eventTypes.CHAT_CHANGED,()=>{streamActive=false;generationChat=null;scheduleRender(true);});
-    c.eventSource.on(c.eventTypes.GENERATION_STARTED,()=>{streamActive=true;generationChat=currentChat();});
+    c.eventSource.on(c.eventTypes.GENERATION_STARTED,(type,options,dryRun)=>{
+        // Quiet prompts and prompt previews do not render a chat reply and may
+        // never emit GENERATION_ENDED. They must not hide the last floor's cards.
+        if(dryRun||type==='quiet'||type==='impersonate')return;
+        streamActive=false;generationChat=currentChat();
+    });
     c.eventSource.on(c.eventTypes.GENERATION_ENDED,()=>{const same=generationChat===currentChat();streamActive=false;generationChat=null;renderAll();if(same)autoLatest();});
-    c.eventSource.on(c.eventTypes.STREAM_TOKEN_RECEIVED,()=>{setTimeout(()=>guard(()=>{scanStream();renderAll();})(),0);});
+    if(c.eventTypes.GENERATION_STOPPED)c.eventSource.on(c.eventTypes.GENERATION_STOPPED,()=>{streamActive=false;generationChat=null;scheduleRender(false);});
+    c.eventSource.on(c.eventTypes.STREAM_TOKEN_RECEIVED,()=>{if(generationChat===currentChat())streamActive=true;setTimeout(()=>guard(()=>{scanStream();renderAll();})(),0);});
     for(const event of ['SECRET_WRITTEN','SECRET_DELETED','SECRET_ROTATED'])if(c.eventTypes[event])c.eventSource.on(c.eventTypes[event],key=>{if(key===SECRET_KEYS.NOVEL){settings.keyHash='';save();}});
     matchMedia('(prefers-color-scheme: dark)').addEventListener('change',applyTheme);
     if(settings.enabled&&!settings.installed)await installDefaults();renderAll();autoLatest();
