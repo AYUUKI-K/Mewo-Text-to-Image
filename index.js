@@ -4,15 +4,20 @@ import { writeSecret, SECRET_KEYS } from '../../../secrets.js';
 import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
 import * as wi from '../../../world-info.js';
 import { getScriptsByType, saveScriptsByType, SCRIPT_TYPES } from '../../regex/engine.js';
-import { defaults, parseBlocks, buildRequest } from './core.js';
+import { createSettingsPanel } from './ui.js';
+import { defaults, parseBlocks, buildRequest, latestImageMessage, canAutoGenerate, validateFolder, imageDay } from './core.js';
 
 const ID='miao_nai_image';
 const base=new URL('.',import.meta.url);
 const ctx=()=>getContext();
 const settings=extension_settings[ID] ??= {enabled:true,stream:false,pattern:'image###([\\s\\S]*?)###',profiles:[{...defaults}],active:0,installed:false};
+settings.mode ??= settings.stream ? 'stream' : 'manual';
+settings.theme ??= 'auto';
+settings.folder ??= 'miao-nai';
+settings.folders ??= ['miao-nai'];
 const running=new Map();
 const attempted=new Set();
-let queue=Promise.resolve(), streamActive=false, timer;
+let queue=Promise.resolve(), streamActive=false, timer, autoScheduled=false, generationChat=null, settingsHost=null;
 const save=()=>ctx().saveSettingsDebounced();
 function el(tag,text,cls) { const n=document.createElement(tag); if(text!==undefined)n.textContent=text; if(cls)n.className=cls; return n; }
 async function errorPopup(error) {
@@ -25,20 +30,22 @@ function identity(message,block) { return `${message.swipe_id??0}:${block.index}
 function state(message,key) { return message.extra?.[ID]?.[key]; }
 function currentChat() { return String(ctx().getCurrentChatId()); }
 function stillValid(chat,message,block,key) { return currentChat()===chat && ctx().chat.includes(message) && blocks(message).some(b=>identity(message,b)===key); }
-function generate(message,block) {
+function generate(message,block,{automatic=false}={}) {
     const key=identity(message,block), chat=currentChat(), taskId=`${chat}:${ctx().chat.indexOf(message)}:${key}`;
     if(running.has(taskId))return;
     const request=buildRequest(settings.profiles[settings.active],block.prompt);
+    const folder=validateFolder(settings.folder);
     attempted.add(taskId);
     const task={status:'排队中',message,key,chat}; running.set(taskId,task); renderAll();
     queue=queue.then(async()=>{
         if(!settings.enabled || !stillValid(chat,message,block,key))return;
+        if(automatic && !canAutoGenerate(ctx().chat,message,settings.mode,streamActive))return;
         task.status='生成中'; renderAll();
         const response=await fetch('/api/novelai/generate-image',{method:'POST',headers:ctx().getRequestHeaders(),body:JSON.stringify(request)});
         if(!response.ok)throw new Error(`NAI HTTP ${response.status}\n${(await response.text()).slice(0,1600)}`);
         const data=(await response.text()).trim();
         if(!data || data.startsWith('{') || data.startsWith('<'))throw new Error('酒馆生图接口未返回有效的 base64 图片，请检查后端兼容性');
-        const url=await saveBase64AsFile(data,'miao-nai',`miao-${Date.now()}`,'png');
+        const url=await saveBase64AsFile(data,folder,`miao-${Date.now()}-${crypto.randomUUID()}`,'png');
         // Do not attach stale results to another chat or edited/swiped messages.
         if(!stillValid(chat,message,block,key)) { toastr.info('图片已保存，但原消息已切换或修改：'+url); return; }
         message.extra??={}; message.extra[ID]??={}; message.extra[ID][key]={url,request,created:Date.now()};
@@ -50,14 +57,18 @@ function generate(message,block) {
 }
 function makeCard(message,block) {
     const key=identity(message,block), card=el('div',undefined,'miao-image-card');
+    card.dataset.theme=resolvedTheme();
     card.dataset.miaoKey=key;
     const record=state(message,key);
     const task=[...running.values()].find(t=>t.chat===currentChat() && t.message===message && t.key===key);
-    if(record?.url) {
+    if(record?.url&&!record.deleted) {
         const link=el('a');link.href=record.url;link.target='_blank';link.rel='noopener';
         const image=el('img');image.src=record.url;image.alt='生成的剧情插图';image.loading='lazy';link.append(image);card.append(link);
     }
-    const button=el('button',task?.status || (record?'重新生成':'生成插图'),'menu_button');button.type='button';button.disabled=!!task;
+    card.dataset.status=`${record?.deleted?'deleted':record?.url||''}:${task?.status||''}`;
+    const caption=el('div',undefined,'miao-image-caption');
+    caption.append(el('span',`插图 ${block.index+1}`),el('span',task?.status || (record?.deleted?'已清理':record?'已生成':'等待生成'),'miao-badge'));card.append(caption);
+    const button=el('button',task?.status || (record?'重新生成':'生成插图'),'miao-button miao-primary');button.type='button';button.disabled=!!task;
     button.addEventListener('click',guard(()=>generate(message,block)));card.append(button);
     const details=el('details'), summary=el('summary','查看提示词');details.append(summary,el('pre',block.prompt));card.append(details);
     return card;
@@ -80,7 +91,10 @@ function renderAll() {
         for(const block of found) {
             const old=[...root.querySelectorAll('.miao-image-card')].find(n=>n.dataset.miaoKey===identity(message,block));
             const card=makeCard(message,block);
-            if(old)old.replaceWith(card);else if(!replaceLiteral(root,block.raw,card))root.append(card);
+            if(old) {
+                old.dataset.theme=card.dataset.theme;
+                if(old.dataset.status!==card.dataset.status) {card.querySelector('details').open=old.querySelector('details')?.open||false;old.replaceWith(card);}
+            } else if(!replaceLiteral(root,block.raw,card))root.append(card);
         }
     });
 }
@@ -108,57 +122,105 @@ async function installDefaults() {
     await installWorld(new File([await w.text()],'[喵喵]文生图 2.0.json',{type:'application/json'}));
     await installRegex(await r.json());settings.installed=true;save();
 }
-function button(parent,text,fn) {const b=el('button',text,'menu_button');b.type='button';b.addEventListener('click',guard(fn));parent.append(b);return b;}
-function input(parent,label,value,onChange,type='text') {
-    const wrap=el('label',undefined,'miao-field');wrap.append(el('span',label));
-    const field=el(type==='textarea'?'textarea':'input');if(type!=='textarea')field.type=type;field.value=value??'';
-    field.className='text_pole';field.addEventListener('change',guard(()=>onChange(type==='number'?Number(field.value):field.value)));wrap.append(field);parent.append(wrap);return field;
+function resolvedTheme() {
+    if(settings.theme!=='auto')return settings.theme;
+    const color=getComputedStyle(document.body).getPropertyValue('--SmartThemeBodyColor').trim();
+    const rgb=color.match(/[\d.]+/g)?.slice(0,3).map(Number);
+    if(rgb?.length===3)return (rgb[0]*.299+rgb[1]*.587+rgb[2]*.114)>140?'dark':'light';
+    return matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';
 }
-function drawSettings() {
+function applyTheme() {
+    document.querySelectorAll('.miao-settings,.miao-image-card').forEach(n=>n.dataset.theme=resolvedTheme());
+}
+async function testImage() {
+    const request=buildRequest(settings.profiles[settings.active],'1girl, adult woman, white dress, flower garden, sunlight');
+    const res=await fetch('/api/novelai/generate-image',{method:'POST',headers:ctx().getRequestHeaders(),body:JSON.stringify(request)});
+    if(!res.ok)throw new Error(`NAI HTTP ${res.status}\n${(await res.text()).slice(0,1600)}`);
+    const url=await saveBase64AsFile((await res.text()).trim(),validateFolder(settings.folder),`test-${Date.now()}-${crypto.randomUUID()}`,'png');
+    const image=el('img');image.src=url;image.style.maxWidth='100%';await callGenericPopup(image,POPUP_TYPE.TEXT);
+}
+function changeFolder(value) {
+    settings.folder=validateFolder(value);
+    if(!settings.folders.includes(settings.folder))settings.folders.push(settings.folder);
+    save();
+}
+async function imageAPI(endpoint,body) {
+    const res=await fetch('/api/images/'+endpoint,{method:'POST',headers:ctx().getRequestHeaders(),body:JSON.stringify(body)});
+    if(!res.ok)throw new Error(`图片管理 HTTP ${res.status}\n${(await res.text()).slice(0,500)}`);
+    return res;
+}
+async function listImages(folder) {
+    folder=validateFolder(folder);
+    const names=await (await imageAPI('list',{folder,sortField:'date',sortOrder:'desc'})).json();
+    return names.filter(name=>typeof name==='string'&&imageDay(name)).map(name=>({name,day:imageDay(name)}));
+}
+async function deleteImages(folder,names) {
+    folder=validateFolder(folder);
+    const allowed=new Set((await listImages(folder)).map(item=>item.name));
+    if(!names.length)return;
+    if(names.some(name=>!allowed.has(name)))throw new Error('清理列表已变化，请刷新后重试');
+    const question=el('div');question.append(el('h3',`清理 ${names.length} 张生成图片？`),el('p',`服务器目录：${folder}`),el('p','这会永久删除服务器上的文件，引用这些图片的聊天将无法再显示原图。'));
+    if(!await callGenericPopup(question,POPUP_TYPE.CONFIRM))return;
+    const removed=[];let failure;
+    for(const name of names) {
+        try {await imageAPI('delete',{path:`user/images/${folder}/${name}`});removed.push(name);}
+        catch(error){failure=error;break;}
+    }
+    const paths=new Set(removed.map(name=>`user/images/${folder}/${name}`));let changed=false;
+    for(const message of ctx().chat)for(const record of Object.values(message.extra?.[ID]||{})) {
+        if(paths.has(String(record.url).replace(/^\//,''))){record.deleted=true;changed=true;}
+    }
+    if(changed)await ctx().saveChat();renderAll();
+    toastr.success(`已清理 ${removed.length} 张图片`);
+    if(failure)throw failure;
+}
+async function openSettings() {
+    if(settingsHost?.isConnected)return;
+    const panel=createSettingsPanel({settings,save,theme:resolvedTheme,onTheme:applyTheme,onError:errorPopup,
+        onChange:async action=>{
+            if(action==='confirm-delete')return Boolean(await callGenericPopup('删除当前配置？',POPUP_TYPE.CONFIRM));
+            renderAll();if(action===true)autoLatest();
+        },
+        saveKey:async key=>{if(!key)throw new Error('请填写 Key');await writeSecret(SECRET_KEYS.NOVEL,key);toastr.success('NAI Key 已保存');},
+        testImage,installDefaults,installWorld,installRegex,listImages,deleteImages,changeFolder});
+    settingsHost=panel;
+    await callGenericPopup(panel,POPUP_TYPE.TEXT,'',{wide:true,okButton:'完成',onOpen:popup=>popup.dlg.classList.add('miao-settings-dialog')});
+    settingsHost=null;
+}
+function mountMenu() {
     document.getElementById('miao-nai-settings')?.remove();
-    const root=el('div',undefined,'miao-settings');root.id='miao-nai-settings';root.append(el('h3','喵喵文生图'));
-    const toggle=(text,key)=>{const label=el('label',undefined,'miao-toggle');const field=el('input');field.type='checkbox';field.checked=settings[key];field.onchange=()=>{settings[key]=field.checked;save();renderAll();};label.append(field,el('span',text));root.append(label);};
-    toggle('启用插件','enabled');toggle('流式自动生成（完整标签闭合后立即入队）','stream');
-    root.append(el('p','默认模式：正文提示词变为按钮，点击生成。流式模式仅处理本次新回复。'));
-    const key=input(root,'NAI API Key（保存到酒馆密钥管理）','',()=>{},'password');key.autocomplete='new-password';
-    button(root,'保存 Key',async()=>{if(!key.value.trim())throw new Error('请填写 Key');await writeSecret(SECRET_KEYS.NOVEL,key.value.trim());key.value='';toastr.success('NAI Key 已保存');});
-    const select=el('select',undefined,'text_pole');settings.profiles.forEach((p,i)=>{const o=el('option',p.name);o.value=i;o.selected=i===settings.active;select.append(o);});select.onchange=()=>{settings.active=+select.value;save();drawSettings();};root.append(select);
-    button(root,'复制为新配置',()=>{settings.profiles.push({...settings.profiles[settings.active],name:'新配置'});settings.active=settings.profiles.length-1;save();drawSettings();});
-    button(root,'删除当前配置',()=>{if(settings.profiles.length===1)throw new Error('至少保留一个配置');settings.profiles.splice(settings.active,1);settings.active=0;save();drawSettings();});
-    const p=settings.profiles[settings.active];
-    for(const [key,label,type] of [['name','配置名称'],['positive','固定正面提示词','textarea'],['artists','画师串','textarea'],['negative','固定负面提示词','textarea'],['model','NAI 模型'],['sampler','采样器'],['scheduler','噪声表'],['width','宽度','number'],['height','高度','number'],['steps','步数','number'],['scale','Guidance','number'],['seed','种子（-1 为随机）','number']])input(root,label,p[key],v=>{p[key]=v;save();},type);
-    button(root,'测试生成（当前配置）',async()=>{
-        const request=buildRequest(p,'1girl, adult woman, white dress, flower garden, sunlight');
-        const res=await fetch('/api/novelai/generate-image',{method:'POST',headers:ctx().getRequestHeaders(),body:JSON.stringify(request)});
-        if(!res.ok)throw new Error(`NAI HTTP ${res.status}\n${(await res.text()).slice(0,1600)}`);
-        const url=await saveBase64AsFile((await res.text()).trim(),'miao-nai',`test-${Date.now()}`,'png');
-        const image=el('img');image.src=url;image.style.maxWidth='100%';await callGenericPopup(image,POPUP_TYPE.TEXT);
-    });
-    input(root,'捕捉表达式（第一捕获组为绘图提示词）',settings.pattern,v=>{new RegExp(v,'gi');if(parseBlocks('image###test###',v).length===0 && !v.includes('('))throw new Error('需要第一捕获组');settings.pattern=v;save();renderAll();});
-    button(root,'载入默认世界书与正则',installDefaults);
-    const upload=(text,accept,fn)=>{const f=el('input');f.type='file';f.accept=accept;f.hidden=true;f.onchange=guard(async()=>{if(f.files[0])await fn(f.files[0]);f.value='';});root.append(f);button(root,text,()=>f.click());};
-    upload('载入自己的世界书','.json',installWorld);
-    upload('载入自己的正则（支持单条或数组）','.json',async f=>installRegex(JSON.parse(await f.text())));
-    root.append(el('p','自定义世界书的输出格式需要匹配上面的捕捉表达式。已有同名世界书和同 ID 正则会复用。'));
-    (document.getElementById('extensions_settings2')||document.getElementById('extensions_settings')).append(root);
+    if(document.getElementById('miao-nai-menu'))return;
+    const item=el('div',undefined,'list-group-item flex-container flexGap5');item.id='miao-nai-menu';item.setAttribute('role','button');item.tabIndex=0;
+    const icon=el('i',undefined,'fa-solid fa-image extensionsMenuExtensionButton');icon.setAttribute('aria-hidden','true');
+    item.append(icon,el('span','喵喵文生图'));item.addEventListener('click',guard(openSettings));
+    item.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();guard(openSettings)();}});
+    const menu=document.getElementById('extensionsMenu');if(menu)menu.append(item);
 }
-function scanStream(text) {
-    if(!settings.enabled||!settings.stream||!streamActive)return;
-    const message=ctx().chat.at(-1);if(!message||message.is_user||message.is_system)return;
-    // ST emits the cumulative response text. Only closed blocks become requests.
-    const source=typeof text==='string'?text:message.mes;
-    for(const block of parseBlocks(source,settings.pattern)) {
-        if(!blocks(message).some(b=>identity(message,b)===identity(message,block)))continue;
+function autoLatest() {
+    if(!settings.enabled)return;
+    const message=latestImageMessage(ctx().chat);
+    if(!message || !canAutoGenerate(ctx().chat,message,settings.mode,streamActive))return;
+    for(const block of blocks(message)) {
         const id=`${currentChat()}:${ctx().chat.indexOf(message)}:${identity(message,block)}`;
-        if(!attempted.has(id) && !state(message,identity(message,block)))generate(message,block);
+        if(!attempted.has(id)&&!state(message,identity(message,block)))generate(message,block,{automatic:true});
     }
 }
+function scanStream() {
+    if(!settings.enabled||settings.mode!=='stream'||!streamActive||generationChat!==currentChat())return;
+    autoLatest();
+}
+function scheduleRender(automatic=false) {
+    autoScheduled ||= automatic;
+    clearTimeout(timer);timer=setTimeout(()=>guard(()=>{const auto=autoScheduled;autoScheduled=false;renderAll();if(auto)autoLatest();})(),80);
+}
 async function init() {
-    drawSettings();const c=ctx();
-    for(const name of ['CHARACTER_MESSAGE_RENDERED','MESSAGE_UPDATED','MESSAGE_SWIPED','MESSAGE_EDITED','CHAT_CHANGED'])if(c.eventTypes[name])c.eventSource.on(c.eventTypes[name],()=>{clearTimeout(timer);timer=setTimeout(()=>{try{renderAll();}catch(e){errorPopup(e);}},50);});
-    c.eventSource.on(c.eventTypes.GENERATION_STARTED,()=>{attempted.clear();streamActive=true;});
-    c.eventSource.on(c.eventTypes.GENERATION_ENDED,()=>{scanStream();streamActive=false;renderAll();});
-    c.eventSource.on(c.eventTypes.STREAM_TOKEN_RECEIVED,()=>{setTimeout(()=>guard(scanStream)(),0);});
-    if(settings.enabled&&!settings.installed)await installDefaults();renderAll();
+    mountMenu();const c=ctx();
+    for(const name of ['CHARACTER_MESSAGE_RENDERED','MESSAGE_UPDATED','MESSAGE_SWIPED','MESSAGE_EDITED'])if(c.eventTypes[name])c.eventSource.on(c.eventTypes[name],()=>scheduleRender(false));
+    c.eventSource.on(c.eventTypes.CHAT_CHANGED,()=>{streamActive=false;generationChat=null;scheduleRender(true);});
+    c.eventSource.on(c.eventTypes.GENERATION_STARTED,()=>{streamActive=true;generationChat=currentChat();});
+    c.eventSource.on(c.eventTypes.GENERATION_ENDED,()=>{const same=generationChat===currentChat();streamActive=false;generationChat=null;renderAll();if(same)autoLatest();});
+    c.eventSource.on(c.eventTypes.STREAM_TOKEN_RECEIVED,()=>{setTimeout(()=>guard(()=>{scanStream();renderAll();})(),0);});
+    matchMedia('(prefers-color-scheme: dark)').addEventListener('change',applyTheme);
+    if(settings.enabled&&!settings.installed)await installDefaults();renderAll();autoLatest();
 }
 jQuery(()=>guard(init)());

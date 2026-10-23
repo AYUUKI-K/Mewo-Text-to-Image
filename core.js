@@ -1,4 +1,23 @@
 export const defaults = {name:'默认',positive:'best quality, masterpiece',artists:'',negative:'lowres, bad anatomy, text, watermark',model:'nai-diffusion-4-5-full',sampler:'k_euler_ancestral',scheduler:'karras',width:512,height:512,steps:20,scale:5,seed:-1};
+// The last floor must itself be an assistant reply. Never fall back to older tags.
+export function latestImageMessage(chat) {
+    const message = chat.at(-1);
+    return message && !message.is_user && !message.is_system ? message : null;
+}
+export function canAutoGenerate(chat, message, mode, streaming = false) {
+    return latestImageMessage(chat) === message && (mode === 'stream' || (mode === 'auto' && !streaming));
+}
+export function validateFolder(value) {
+    if(typeof value!=='string'||!value.trim()||value.length>64||!/^[\p{L}\p{N}_ -]+$/u.test(value))throw new Error('目录名可用中英文、数字、空格、短横线和下划线，最多 64 字；不支持绝对路径');
+    return value.trim();
+}
+export function imageDay(filename) {
+    const match=/^(?:miao|test)-(\d{13})(?:-[\da-f-]+)?\.png$/i.exec(filename);
+    if(!match)return null;
+    const date=new Date(Number(match[1]));
+    if(!Number.isFinite(date.getTime()))return null;
+    return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+}
 export function parseBlocks(text, pattern = 'image###([\\s\\S]*?)###') {
     const regex = new RegExp(pattern, 'gi');
     return [...String(text).matchAll(regex)].filter(m => m[1]?.trim()).map((m, index) => ({index, raw:m[0], prompt:m[1].trim(), start:m.index}));

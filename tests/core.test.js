@@ -1,6 +1,31 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {parseBlocks,buildRequest,defaults} from '../core.js';
+import {parseBlocks,buildRequest,defaults,latestImageMessage,canAutoGenerate,validateFolder,imageDay} from '../core.js';
+test('only #5 is eligible when #3 and #5 both contain tags',()=>{
+ const chat=Array.from({length:6},(_,i)=>({mes:`floor ${i}`}));
+ chat[3].mes='image###third###';chat[5].mes='image###fifth###';
+ for(const mode of ['auto','stream']){assert.equal(canAutoGenerate(chat,chat[3],mode),false);assert.equal(canAutoGenerate(chat,chat[5],mode),true);}
+ assert.equal(canAutoGenerate(chat,chat[5],'manual'),false);
+ assert.equal(canAutoGenerate(chat,chat[5],'auto',true),false);
+ assert.equal(canAutoGenerate(chat,chat[5],'stream',true),true);
+ chat.push({is_user:true,mes:'next'});assert.equal(latestImageMessage(chat),null);
+ assert.equal(canAutoGenerate(chat,chat[5],'auto'),false);
+});
+test('new latest floor disqualifies a queued automatic task',()=>{
+ const previous={mes:'image###old###'},chat=[previous];
+ assert.equal(canAutoGenerate(chat,previous,'auto'),true);
+ chat.push({mes:'image###new###'});assert.equal(canAutoGenerate(chat,previous,'auto'),false);
+});
+test('storage only permits a server image subfolder',()=>{
+ assert.equal(validateFolder('喵喵图片-2026'),'喵喵图片-2026');
+ for(const invalid of ['','../other','/tmp','C:\\data','a/b','a\\b','.'])assert.throws(()=>validateFolder(invalid));
+});
+test('date cleanup recognizes plugin files, excluding unrelated files',()=>{
+ const time=new Date(2026,9,23,12).getTime();
+ assert.equal(imageDay(`miao-${time}.png`),'2026-10-23');
+ assert.equal(imageDay(`test-${time}-aa-bb.png`),'2026-10-23');
+ for(const name of ['photo.png','../miao-1792737847709.png','miao-hello.png','some-other-file.png'])assert.equal(imageDay(name),null);
+});
 test('only closed nonempty blocks are recognized during streaming',()=>{
  assert.equal(parseBlocks('image###unfinished').length,0);
  assert.equal(parseBlocks('image######').length,0);
