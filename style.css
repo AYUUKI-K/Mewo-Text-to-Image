@@ -54,6 +54,7 @@
 #miao-nai-settings[data-section=overview]>.miao-tabs{display:none!important}
 .miao-generation-layout{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr);align-items:start;gap:32px;min-width:0}.miao-generation-column{display:flex;flex-direction:column;gap:22px;min-width:0}.miao-generation-column .miao-field{grid-template-columns:92px minmax(0,1fr)}
 .miao-prompt-metadata{display:flex;flex-wrap:wrap;gap:8px 24px;font-size:12px;color:var(--mi-muted)}.miao-prompt-view [hidden]{display:none!important}
+.miao-translation-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.miao-translation-actions .miao-button{min-height:44px}
 #chat .mes:has(textarea.edit_textarea,#curEditTextarea) .miao-image-card{display:none!important}
 @container miao-settings (max-width:760px){.miao-generation-layout{grid-template-columns:minmax(0,1fr);gap:22px}}
 @container miao-settings (max-width:620px){.miao-config-workspace{grid-template-columns:minmax(0,1fr);gap:18px}.miao-config-workspace textarea{min-height:200px}}

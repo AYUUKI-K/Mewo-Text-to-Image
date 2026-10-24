@@ -419,19 +419,19 @@ const translatePrompt=createPromptTranslator({getHeaders:()=>ctx().getRequestHea
 async function showPrompt(prompt,vibes=[],profileName='',pending=false){
     const view=el('section',undefined,'miao-prompt-view');view.append(el('h3','绘图提示词'),el('pre',prompt));
     const metadata=el('div',undefined,'miao-prompt-metadata');metadata.append(el('span',(pending?'当前配置：':'配置：')+(profileName||'未记录')),el('span',(pending?'Vibe 候选：':'Vibe：')+(vibes.length?vibes.map(v=>v.name||v.id).join('、'):pending?'未选择':'未使用')));view.append(metadata);
-    const button=el('button','Google 翻译为中文','miao-button');button.type='button';
+    const actions=el('div',undefined,'miao-translation-actions'),buttons=new Map();
+    const providers=[['google','Google 翻译'],['bing','Microsoft 翻译']];
+    for(const [provider,label] of providers){const button=el('button',label,'miao-button');button.type='button';button.dataset.translationProvider=provider;button.onclick=()=>runTranslation(provider);buttons.set(provider,button);actions.append(button);}
     const note=el('p','','miao-muted');note.setAttribute('role','status');note.hidden=true;
     const fallback=el('a','在 Google 翻译中打开');fallback.href='https://translate.google.com/?'+new URLSearchParams({sl:'auto',tl:'zh-CN',text:prompt,op:'translate'});fallback.target='_blank';fallback.rel='noopener noreferrer';fallback.hidden=true;
-    const alternative=el('button','改用 Microsoft 翻译','miao-button');alternative.type='button';alternative.hidden=true;
     const translated=el('pre');translated.hidden=true;translated.setAttribute('aria-live','polite');
-    const runTranslation=async(provider='google')=>{if(button.disabled)return;button.disabled=alternative.disabled=true;button.textContent='翻译中…';note.textContent='';note.hidden=fallback.hidden=alternative.hidden=true;let failed=false;try{
+    const runTranslation=async(provider)=>{const button=buttons.get(provider);if(button.disabled)return;for(const item of buttons.values())item.disabled=true;button.textContent='翻译中…';note.textContent='';note.hidden=fallback.hidden=translated.hidden=true;let failed=false;try{
         const result=await translatePrompt(prompt,(index,total)=>{button.textContent=total>1?`翻译中 ${index}/${total}`:'翻译中…';},{provider});
         translated.textContent=result;translated.hidden=false;
-        note.textContent=provider==='bing'?'Microsoft 翻译':'';note.hidden=provider!=='bing';
-    }catch(error){failed=true;note.textContent=['TimeoutError','AbortError'].includes(error.name)?'翻译超时，请重试':error instanceof TypeError?'翻译连接失败，请重试':String(error.message||error);note.hidden=fallback.hidden=false;alternative.hidden=isTT();
-    }finally{button.disabled=alternative.disabled=false;button.textContent=failed?'重试 Google 翻译':'Google 翻译为中文';}};
-    button.onclick=()=>runTranslation();alternative.onclick=()=>runTranslation('bing');
-    view.append(button,note,alternative,fallback,translated);await showPopup(view,POPUP_TYPE.TEXT,'',{wide:true,onOpen:popup=>popup.dlg.classList.add('miao-content-dialog')});
+        note.textContent=providers.find(([name])=>name===provider)[1];note.hidden=false;
+    }catch(error){failed=true;note.textContent=['TimeoutError','AbortError'].includes(error.name)?'翻译超时，请重试':error instanceof TypeError?'翻译连接失败，请重试':String(error.message||error);note.hidden=false;fallback.hidden=provider!=='google';
+    }finally{for(const [name,label] of providers){const item=buttons.get(name);item.disabled=false;item.textContent=failed&&name===provider?'重试 '+label:label;}}};
+    view.append(actions,note,fallback,translated);await showPopup(view,POPUP_TYPE.TEXT,'',{wide:true,onOpen:popup=>popup.dlg.classList.add('miao-content-dialog')});
 }
 async function importVibeFile(file){
     if(file.size>18*1024*1024)throw Error('文件不能超过 18 MB');
