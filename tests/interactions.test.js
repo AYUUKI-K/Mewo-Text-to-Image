@@ -2,6 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {bindImageGesture} from '../interactions.js';
 import {createFloatingEntry} from '../interactions.js';
+import {clampImageView} from '../interactions.js';
+test('viewer zoom respects image aspect ratio, reset and eight-times limit',()=>{
+    const dimensions={width:400,height:600,imageWidth:1200,imageHeight:800};
+    assert.deepEqual(clampImageView({scale:1,x:500,y:500},dimensions),{scale:1,x:0,y:0});
+    assert.deepEqual(clampImageView({scale:2,x:900,y:900},dimensions),{scale:2,x:200,y:0});
+    const dragged=clampImageView({scale:3,x:-900,y:-900},dimensions);
+    assert.equal(dragged.x,-400);assert.ok(Math.abs(dragged.y+100)<1e-9);
+    assert.equal(clampImageView({scale:100,x:0,y:0},dimensions).scale,8);
+    assert.equal(clampImageView({scale:.5},dimensions).scale,1);
+    assert.deepEqual(clampImageView({scale:2,x:100,y:100},{width:600,height:400,imageWidth:800,imageHeight:1200}),{scale:2,x:0,y:100});
+});
 function fixture(clicks=2){
     const image=new EventTarget();let time=1000,rerolls=0,singles=0;
     bindImageGesture(image,{getClicks:()=>clicks,onSingle:()=>singles++,onReroll:()=>rerolls++,now:()=>time,delay:15});

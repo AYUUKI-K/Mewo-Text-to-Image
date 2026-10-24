@@ -19,3 +19,15 @@ export function selectImageVersion(record,offset){
     Object.assign(record,{versions,selected,url:item.url,request:item.request,profileName:item.profileName,created:item.created,deleted:false});
     return item;
 }
+const imagePath=url=>{try{return decodeURIComponent(new URL(url,'https://miao.local').pathname).replace(/^\//,'');}catch{return String(url).replace(/^\//,'');}};
+export function markImageVersionsDeleted(record,urls){
+    const paths=new Set(urls.map(imagePath)),versions=imageVersions(record);
+    let changed=false;
+    for(const version of versions)if(!version.deleted&&paths.has(imagePath(version.url))){version.deleted=true;changed=true;}
+    if(!changed)return false;
+    record.versions=versions;
+    const selected=Math.max(0,Math.min(record.selected??versions.length-1,versions.length-1));
+    record.selected=selected;
+    if(versions[selected]?.deleted&&!selectImageVersion(record,-1))record.deleted=true;
+    return true;
+}

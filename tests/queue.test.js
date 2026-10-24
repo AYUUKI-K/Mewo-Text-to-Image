@@ -40,3 +40,15 @@ test('generation errors release the lock without retrying NAI',async()=>{
  try{await assert.rejects(()=>runWithQueue({url:'http://127.0.0.1:'+server.address().port,keyHash:hash('one'),generate:async()=>{calls++;throw new Error('upstream failed');}}),/upstream failed/);assert.equal(calls,1);assert.deepEqual(queue.stats(),{active:0,waiting:0});}
  finally{server.closeAllConnections();await new Promise(r=>server.close(r));}
 });
+
+test('HTTP burst with 12 keys and 48 clients never overlaps the same key and allows parallel keys',async()=>{
+ const queue=new LeaseQueue(),server=createQueueServer({queue});await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const active=new Map();let parallel=0,peak=0;
+ try{
+  const jobs=Array.from({length:48},(_,i)=>{const key='burst-key-'+(i%12);return runWithQueue({url:'http://127.0.0.1:'+server.address().port,keyHash:hash(key),pollMs:2,heartbeatMs:100,generate:async()=>{
+   assert.equal(active.get(key)||0,0);active.set(key,1);parallel++;peak=Math.max(peak,parallel);
+   await new Promise(resolve=>setTimeout(resolve,5));active.set(key,0);parallel--;return i;
+  }});});
+  assert.equal((await Promise.all(jobs)).length,48);assert.ok(peak>1);assert.deepEqual(queue.stats(),{active:0,waiting:0});
+ }finally{server.closeAllConnections();await new Promise(r=>server.close(r));}
+});

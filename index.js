@@ -3,7 +3,7 @@ import { getContext, extension_settings } from '../../../extensions.js';
 import * as extensionAPI from '../../../extensions.js';
 import { saveBase64AsFile } from '../../../utils.js';
 import * as hostUtils from '../../../utils.js';
-import {bindImageGesture,createFloatingEntry} from './interactions.js';
+import {bindImageGesture,createFloatingEntry,bindImageZoom} from './interactions.js';
 import {persistHostSettings} from './settings-save.js';
 import {createPromptTranslator} from './translation.js';
 import {RESOURCE_VERSION,WORLD_NAME,mergeWorldEntries,mergeRegexRules,bundledWorldTargets,migrateWorldBindings} from './resources.js';
@@ -15,7 +15,7 @@ import { getScriptsByType, saveScriptsByType, SCRIPT_TYPES } from '../../regex/e
 import { createSettingsPanel } from './ui.js';
 import {createDirectClient} from './direct-client.js';
 import {createKeyVault,saveCurrentKey} from './direct-key.js';
-import {appendImageVersion,imageVersions,selectImageVersion} from './image-history.js';
+import {appendImageVersion,imageVersions,selectImageVersion,markImageVersionsDeleted} from './image-history.js';
 import {selectVibes,profileVibeEnabled} from './vibe.js';
 import {createExtensionUpdater} from './updates.js';
 import {downloadImageSelection} from './downloads.js';
@@ -51,14 +51,16 @@ const attempted=new Set();
 const cardBindings=new WeakMap();
 let chatObserver,chatRootObserver,observedChat,imageSaves=0;
 let queue=Promise.resolve(), streamActive=false, timer, autoScheduled=false, generationChat=null, settingsHost=null,imageToolsEpoch=0;
-let settingsPopup=null,autoSession=null,floatingDispose=()=>{},lastGestureReroll=0;
+let settingsPopup=null,pendingSettingsConfirm=null,autoSession=null,floatingDispose=()=>{},lastGestureReroll=0;
 const save=()=>ctx().saveSettingsDebounced();
 const persistSettings=()=>persistHostSettings({saveNow:async()=>{const host=await import('../../../../script.js');return host.saveSettings();},source:ctx().eventSource,event:ctx().eventTypes.SETTINGS_UPDATED});
 const directUser=getCurrentUserHandle(),directVault=createKeyVault(directUser);
-const direct=createDirectClient({settings,save,getHeaders:()=>ctx().getRequestHeaders(),getKey:async()=>{
+const direct=createDirectClient({settings,save,getHeaders:()=>ctx().getRequestHeaders(),getKey:async expectedKeyHash=>{
     if(getCurrentUserHandle()!==directUser)throw Error('酒馆用户已切换，请刷新页面后重试');
     const key=await directVault.get();
-    if(key&&(!settings.keyHash||await fingerprintKey(key)!==settings.keyHash))throw Error('直连 Key 与当前配置不匹配，请在本插件重新保存当前 Key');
+    const actualHash=key?await fingerprintKey(key):'';
+    if(expectedKeyHash&&actualHash!==expectedKeyHash)throw Error('NAI Key 已更换，请重新生成');
+    if(key&&(!settings.keyHash||actualHash!==settings.keyHash))throw Error('直连 Key 与当前配置不匹配，请在本插件重新保存当前 Key');
     return key;
 },unzipPNG:async bytes=>{
     if(!globalThis.JSZip)await import('/lib/jszip.min.js');
@@ -79,10 +81,54 @@ async function showPopup(content,type,input='',options={}){
 }
 
 async function errorPopup(error) {
+    if(isTT()&&settingsHost?.isConnected){toastr.error(String(error.message||error),'操作失败',{escapeHtml:true});return;}
     const box=el('div',undefined,'miao-prompt-view'); box.append(el('h3','喵喵文生图：操作失败'),el('pre',String(error.message||error)));
     await showPopup(box,POPUP_TYPE.TEXT);
 }
 const guard=fn=>(...args)=>Promise.resolve().then(()=>fn(...args)).catch(errorPopup);
+async function confirmSettings(question,title='确认删除'){
+    if(pendingSettingsConfirm)return false;
+    const settingsDialog=settingsHost?.closest('dialog'),standalone=!settingsDialog;
+    const dialog=settingsDialog||el('dialog',undefined,'miao-modal miao-confirm-dialog');
+    const body=standalone?el('div',undefined,'popup-body'):dialog.querySelector('.popup-body');
+    const content=standalone?el('div',undefined,'popup-content'):dialog.querySelector('.popup-content');
+    if(standalone){
+        body.append(content);dialog.append(body);document.body.append(dialog);
+        if(typeof dialog.showModal!=='function'){
+            try{const {default:polyfill}=await import('/lib/dialog-polyfill.esm.js');polyfill.registerDialog(dialog);}
+            catch(error){dialog.remove();throw error;}
+        }
+    }
+    const layer=el('div',undefined,'miao-confirmation-layer'),card=el('section',undefined,'miao-confirmation-card');
+    card.setAttribute('role','alertdialog');card.setAttribute('aria-modal','true');
+    const heading=el('h3',title);heading.id='miao-confirmation-title';card.setAttribute('aria-labelledby',heading.id);card.append(heading);
+    const message=el('div',undefined,'miao-confirmation-message');message.id='miao-confirmation-message';
+    if(typeof question==='string')message.textContent=question;else message.append(question);
+    card.setAttribute('aria-describedby',message.id);card.append(message);
+    const actions=el('div',undefined,'miao-confirmation-actions'),cancel=el('button','取消','miao-button'),confirm=el('button','删除','miao-button miao-danger');
+    cancel.type=confirm.type='button';cancel.dataset.action='cancel';confirm.dataset.action='confirm';actions.append(cancel,confirm);card.append(actions);layer.append(card);
+    const previousFocus=document.activeElement,wasInert=content.inert;content.inert=true;dialog.dataset.miaoConfirming='true';body.append(layer);
+    return new Promise((resolve,reject)=>{
+        let done=false;
+        const finish=(result,error)=>{
+            if(done)return;done=true;pendingSettingsConfirm=null;
+            dialog.removeEventListener('keydown',onKey,true);dialog.removeEventListener('cancel',onCancel,true);dialog.removeEventListener('close',onClose);
+            layer.remove();content.inert=wasInert;delete dialog.dataset.miaoConfirming;
+            if(standalone){if(dialog.open)dialog.close();dialog.remove();}
+            const focus=previousFocus?.isConnected&&!previousFocus.disabled?previousFocus:settingsHost?.querySelector('.miao-drawer-close');focus?.focus();if(error)reject(error);else resolve(result);
+        };
+        const onKey=event=>{
+            if(['Escape','Tab','Enter',' '].includes(event.key)){event.preventDefault();event.stopImmediatePropagation();}
+            if(event.key==='Escape')finish(false);
+            else if(event.key==='Tab')(document.activeElement===cancel?confirm:cancel).focus();
+            else if(event.key==='Enter'||event.key===' ')finish(document.activeElement===confirm);
+        };
+        const onCancel=event=>{event.preventDefault();event.stopImmediatePropagation();finish(false);},onClose=()=>finish(false);
+        pendingSettingsConfirm=finish;cancel.onclick=()=>finish(false);confirm.onclick=()=>finish(true);
+        dialog.addEventListener('keydown',onKey,true);dialog.addEventListener('cancel',onCancel,true);dialog.addEventListener('close',onClose);cancel.focus();
+        if(standalone){try{dialog.showModal();cancel.focus();}catch(error){finish(false,error);}}
+    });
+}
 const generationError=error=>toastr.error(String(error.message||error),'生图失败',{escapeHtml:true,timeOut:8000});
 function reasoningFormat(){const r=ctx().powerUserSettings?.reasoning||{};return {prefix:ctx().substituteParams?.(r.prefix||'')??r.prefix,suffix:ctx().substituteParams?.(r.suffix||'')??r.suffix};}
 function blocks(message) { return parseBodyBlocks(message.mes,settings.pattern,reasoningFormat()); }
@@ -132,7 +178,7 @@ function startGeneration(message,block,{automatic=false}={}) {
     request.vibes=selectVibes(settings.profiles[settings.active],settings.vibeLibrary);
     const folder=validateFolder(settings.folder);
     attempted.add(taskId);
-    const task={status:'排队中',message,key,chat,messageIndex:ctx().chat.indexOf(message),name:message.name,is_user:!!message.is_user,is_system:!!message.is_system,swipe:message.swipe_id??0,prompt:promptIdentity(block.prompt),occurrence:blocks(message).filter(b=>promptIdentity(b.prompt)===promptIdentity(block.prompt)).findIndex(b=>b.start===block.start),previousRecord:state(message,key),toolsEpoch:imageToolsEpoch};
+    const task={status:'排队中',keyHash:settings.keyHash,cloudQueue:settings.cloudQueue,queueUrl:settings.queueUrl,message,key,chat,messageIndex:ctx().chat.indexOf(message),name:message.name,is_user:!!message.is_user,is_system:!!message.is_system,swipe:message.swipe_id??0,prompt:promptIdentity(block.prompt),occurrence:blocks(message).filter(b=>promptIdentity(b.prompt)===promptIdentity(block.prompt)).findIndex(b=>b.start===block.start),previousRecord:state(message,key),toolsEpoch:imageToolsEpoch};
     const waiting=running.size>0||settings.cloudQueue;running.set(taskId,task);renderAll();
     if(waiting)toastr.info('已加入生图队列','喵喵文生图');
     queue=queue.then(async()=>{
@@ -185,7 +231,8 @@ function makeCard(message,block) {
         card._cancelGesture=cancelGesture;
         image.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();actions.hidden=!actions.hidden;}});
         card.append(image);
-        if(versions.length>1){
+        const available=versions.map((version,index)=>({version,index})).filter(({version})=>version.url&&!version.deleted);
+        if(available.length>1){
             const navigation=el('nav',undefined,'miao-version-nav');navigation.setAttribute('aria-label','图片版本');actions.append(navigation);
             const switchTo=async offset=>{
                 // Cards may outlive their captured record after chat state updates.
@@ -198,12 +245,22 @@ function makeCard(message,block) {
                 card.replaceWith(replacement);await ctx().saveChat();
             };
             const prev=button('‹',()=>switchTo(-1),navigation);prev.setAttribute('aria-label','上一张');prev.title='上一张';
-            const count=el('span',`${selected+1} / ${versions.length}`,'miao-version-count');count.setAttribute('aria-live','polite');navigation.append(count);
+            const count=el('span',`${available.findIndex(item=>item.index===selected)+1} / ${available.length}`,'miao-version-count');count.setAttribute('aria-live','polite');navigation.append(count);
             const next=button('›',()=>switchTo(1),navigation);next.setAttribute('aria-label','下一张');next.title='下一张';
         }
         const operations=el('div',undefined,'miao-image-operations');actions.append(operations);
         button('提示词',()=>showPrompt(current.request?.prompt||block.prompt,current.request?.vibes,current.profileName),operations).setAttribute('aria-label','查看提示词');
         button('下载',()=>downloadImage(current.url),operations).setAttribute('aria-label','下载图片');button('放大',()=>openImage(current.url),operations).setAttribute('aria-label','放大查看');
+        operations.dataset.hasDelete='true';
+        const remove=button('删除',async()=>{
+            if(remove.disabled)return;remove.disabled=true;
+            try{
+                const url=new URL(current.url,location.href),match=url.pathname.match(/^\/user\/images\/([^/]+)\/([^/]+)$/);
+                if(url.origin!==location.origin||!match)throw Error('这张图片不在酒馆图片目录');
+                await deleteImages(decodeURIComponent(match[1]),[decodeURIComponent(match[2])]);
+            }catch(error){toastr.error(String(error.message||error),'删除失败',{escapeHtml:true});}
+            finally{remove.disabled=false;}
+        },operations);remove.setAttribute('aria-label','删除当前图');remove.title='删除当前图';
     }else if(!task){
         actions.hidden=false;button(task?.status||'生成插图',()=>generate(message,block)).disabled=!!task;button('查看提示词',()=>{const profile=settings.profiles[settings.active],enabled=profileVibeEnabled(profile);return showPrompt(block.prompt,enabled?(profile.vibes||[]).map(v=>({...v,name:settings.vibeLibrary?.find(item=>item.id===v.id)?.name||v.name||v.id})):[],profile.name,true,enabled);});
     }
@@ -449,7 +506,8 @@ async function downloadImages(images){
 async function openImage(url,name='miao-image.png') {
     const view=el('div',undefined,'miao-image-viewer');
     const image=el('img');image.src=url;image.alt='图片预览';
-    view.append(image);await showPopup(view,POPUP_TYPE.TEXT,'',{wide:true,onOpen:popup=>popup.dlg.classList.add('miao-image-viewer-dialog')});
+    view.append(image);const dispose=bindImageZoom(view,image);
+    try{await showPopup(view,POPUP_TYPE.TEXT,'',{wide:true,onOpen:popup=>popup.dlg.classList.add('miao-image-viewer-dialog')});}finally{dispose();}
 }
 async function queueStatus() {
     const url=validateQueueURL(settings.queueUrl);
@@ -458,17 +516,20 @@ async function queueStatus() {
     return response.json();
 }
 async function requestImage(request,task,canContinue) {
+    const scope=task||{keyHash:settings.keyHash,cloudQueue:settings.cloudQueue,queueUrl:settings.queueUrl};
+    const assertKey=()=>{if(settings.keyHash!==scope.keyHash)throw Error('NAI Key 已更换，请重新生成');};
     const generate=async()=>{
+        assertKey();
         if(task){task.status='正在生图';renderAll();}
         toastr.info('正在生图','喵喵文生图');
-        if(isTT()||request.vibes?.length)return direct.generate(request);
+        if(isTT()||request.vibes?.length)return direct.generate(request,{expectedKeyHash:scope.keyHash});
         const response=await fetch('/api/novelai/generate-image',{method:'POST',headers:ctx().getRequestHeaders(),body:JSON.stringify(request),signal:AbortSignal.timeout(180000)});
         if(!response.ok)throw new Error(`NAI HTTP ${response.status}\n${(await response.text()).slice(0,1600)}`);
         const data=(await response.text()).trim();
         if(!data||data.startsWith('{')||data.startsWith('<'))throw new Error('酒馆生图接口未返回有效图片');
         return data;
     };
-    if(settings.cloudQueue)return runWithQueue({url:settings.queueUrl,keyHash:settings.keyHash,generate,canContinue,
+    if(scope.cloudQueue)return runWithQueue({url:scope.queueUrl,keyHash:scope.keyHash,generate,canContinue:()=>{assertKey();return canContinue?.()??true;},
         onStatus:status=>{if(task){task.status=status;renderAll();}},
         onReleaseError:()=>toastr.info('队列连接中断，占用将自动到期释放')});
     return generate();
@@ -519,32 +580,31 @@ async function deleteImages(folder,names) {
     const allowed=new Set((await listImages(folder)).map(item=>item.name));
     if(!names.length)return;
     if(names.some(name=>!allowed.has(name)))throw new Error('清理列表已变化，请刷新后重试');
-    const question=el('div');question.append(el('h3',`清理 ${names.length} 张生成图片？`),el('p',`服务器目录：${folder}`),el('p','这会永久删除服务器上的文件，引用这些图片的聊天将无法再显示原图。'));
+    const question=el('div');question.append(el('p',`删除 ${names.length} 张图片？目录：${folder}`),el('p','永久删除后，聊天中引用的原图也将失效。'));
     const previews=el('div',undefined,'miao-history-grid');
     for(const name of names.slice(0,24)){const image=el('img');image.src=imageURL(folder,name);image.alt=name;image.loading='lazy';previews.append(image);}
     if(names.length>24)question.append(el('p',`共 ${names.length} 张，下方预览前 24 张。`));
     question.append(previews);
-    if(!await showPopup(question,POPUP_TYPE.CONFIRM))return;
+    if(!await confirmSettings(question,'删除图片'))return false;
     const removed=[];let failure;
     for(const name of names) {
         try {await imageAPI('delete',{path:`user/images/${folder}/${name}`});removed.push(name);}
         catch(error){failure=error;break;}
     }
-    const paths=new Set(removed.map(name=>`user/images/${folder}/${name}`));let changed=false;
+    const paths=removed.map(name=>`user/images/${folder}/${name}`);let changed=false;
     for(const message of ctx().chat)for(const {swipe,slot,record} of swipeImageRecords(message)) {
-        for(const version of imageVersions(record)){if(paths.has(String(version.url).replace(/^\//,''))){version.deleted=true;changed=true;}}
-        if(paths.has(String(record.url).replace(/^\//,''))){record.deleted=true;changed=true;}
-        writeSwipeImage(message,swipe,slot,record);
+        if(markImageVersionsDeleted(record,paths)){changed=true;writeSwipeImage(message,swipe,slot,record);}
     }
     if(changed)await ctx().saveChat();renderAll();
-    toastr.success(`已清理 ${removed.length} 张图片`);
+    if(removed.length)toastr.success(`已清理 ${removed.length} 张图片`);
     if(failure)throw failure;
+    return true;
 }
 async function openSettings() {
     if(settingsHost?.isConnected)return;
     const panel=createSettingsPanel({settings,save,persistSettings,theme:resolvedTheme,onTheme:applyTheme,onError:errorPopup,
         onChange:async action=>{
-            if(action==='confirm-delete')return Boolean(await showPopup('删除当前配置？',POPUP_TYPE.CONFIRM));
+            if(action==='confirm-delete')return confirmSettings(`删除配置「${settings.profiles[settings.active].name}」？`,'删除配置');
             autoSession=null;refreshFloating();renderAll();
         },
         saveKey:async input=>{await saveCurrentKey({input,vault:directVault,settings,writeServerKey:key=>writeSecret(SECRET_KEYS.NOVEL,key),fingerprint:fingerprintKey,save});toastr.success(settings.rememberDirectKey?'NAI Key 已保存到酒馆和当前设备，刷新后可继续使用':'NAI Key 已保存，直连 Key 仅在当前页面暂存');},
@@ -554,11 +614,11 @@ async function openSettings() {
         directKeyStatus:async()=>{const status=await directVault.status(),key=await directVault.get();return {...status,ready:Boolean(key&&settings.keyHash&&await fingerprintKey(key)===settings.keyHash),serverSaved:!!settings.keyHash};},clearDirectKey:()=>directVault.clear(),
         closeSettings:()=>settingsPopup?.completeAffirmative?settingsPopup.completeAffirmative():settingsPopup?.dlg.close(),
         setRememberDirectKey:async value=>{await directVault.remember(value);settings.rememberDirectKey=value;save();},
-        encodeVibe:async body=>{const generate=()=>direct.encode(body);return settings.cloudQueue?runWithQueue({url:settings.queueUrl,keyHash:settings.keyHash,generate}):generate();},renameVibe:body=>direct.rename(body),
-        deleteVibe:async id=>{if(!await showPopup('删除这个 Vibe？所有配置中的引用也会移除。',POPUP_TYPE.CONFIRM))return false;await direct.delete(id);for(const p of settings.profiles)p.vibes=(p.vibes||[]).filter(v=>v.id!==id);save();return true;}});
+        encodeVibe:async body=>{const keyHash=settings.keyHash,generate=()=>{if(settings.keyHash!==keyHash)throw Error('NAI Key 已更换，请重新编码');return direct.encode(body,{expectedKeyHash:keyHash});};return settings.cloudQueue?runWithQueue({url:settings.queueUrl,keyHash,generate}):generate();},renameVibe:body=>direct.rename(body),
+        deleteVibe:async id=>{if(!await confirmSettings('删除这个 Vibe？所有配置中的引用也会移除。','删除 Vibe'))return false;await direct.delete(id);for(const p of settings.profiles)p.vibes=(p.vibes||[]).filter(v=>v.id!==id);save();return true;}});
     settingsHost=panel;
-    try{await showPopup(panel,POPUP_TYPE.TEXT,'',{wide:true,okButton:'完成',onOpen:popup=>{settingsPopup=popup;popup.dlg.classList.add('miao-settings-dialog');}});}
-    finally{settingsHost=null;settingsPopup=null;}
+    try{await showPopup(panel,POPUP_TYPE.TEXT,'',{wide:true,okButton:'完成',onClosing:()=>{if(pendingSettingsConfirm){pendingSettingsConfirm(false);return false;}return true;},onOpen:popup=>{settingsPopup=popup;popup.dlg.classList.add('miao-settings-dialog');}});}
+    finally{pendingSettingsConfirm?.(false);settingsHost=null;settingsPopup=null;}
 }
 function mountMenu() {
     document.getElementById('miao-nai-settings')?.remove();

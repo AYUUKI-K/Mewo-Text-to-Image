@@ -49,3 +49,9 @@ test('uncertain direct network failures retain TypeError so queue lease is not r
  const settings={vibeLibrary:[]};const client=createDirectClient({settings,save(){},getHeaders:()=>({}),getKey:async()=>'test-key',unzipPNG:async()=>'',fetchImpl:async()=>{throw new TypeError('network');}});
  await assert.rejects(client.generate({model:'nai-diffusion-4-5-full',vibes:[]}),e=>e.name==='TypeError'&&e.message.includes('不确定'));
 });
+
+test('queued direct generation passes its original key fingerprint and stops before NAI when the key changes',async()=>{
+ let calls=0;
+ const client=createDirectClient({settings:{vibeLibrary:[]},save(){},getHeaders:()=>({}),getKey:async expected=>{assert.equal(expected,'original-key-hash');throw Error('NAI Key 已更换');},unzipPNG:async()=>'',fetchImpl:async()=>{calls++;return new Response('not expected');}});
+ await assert.rejects(client.generate({model:'nai-diffusion-4-5-full',vibes:[]},{expectedKeyHash:'original-key-hash'}),/Key 已更换/);assert.equal(calls,0);
+});
