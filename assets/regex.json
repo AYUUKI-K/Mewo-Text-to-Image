@@ -1,10 +1,10 @@
 [
   {
     "id": "9d3a2fdf-7cde-4cb5-a17e-29c955ce435b",
-    "scriptName": "喵喵文生图1-去标签-0820",
+    "scriptName": "喵喵文生图1-去标签-1024",
     "disabled": false,
     "runOnEdit": true,
-    "findRegex": "/┈┈[\\s\\S]*?┈┈|image###[\\s\\S]*?###|<easter_egg>\\s*([\\s\\S]*?)\\s*<\\/easter_egg>/gi",
+    "findRegex": "/^[\\t ]*\\x60{3}(?:html|xml)?[\\t ]*\\r?\\n\\s*\\\\?<\\s*easter[_-]egg\\s*\\\\?>\\s*((?:(?!\\\\?<\\s*easter[_-]egg\\s*\\\\?>)[\\s\\S])*?)\\s*\\\\?<\\s*\\\\?\\/\\s*easter[_-]egg\\s*\\\\?>[\\t ]*\\r?\\n[\\t ]*\\x60{3}[\\t ]*(?=\\r?$)|\\\\?<\\s*easter[_-]egg\\s*\\\\?>\\s*((?:(?!\\\\?<\\s*easter[_-]egg\\s*\\\\?>)[\\s\\S])*?)\\s*\\\\?<\\s*\\\\?\\/\\s*easter[_-]egg\\s*\\\\?>|image###(?:(?!image###)[\\s\\S])*?###|┈{2,}[^\\r\\n]*?┈{2,}/gim",
     "trimStrings": [],
     "replaceString": "",
     "placement": [
@@ -18,10 +18,10 @@
   },
   {
     "id": "8407e6cf-4500-4cd9-9455-939aafdf7101",
-    "scriptName": "喵喵文生图2-去imagethink-0511",
+    "scriptName": "喵喵文生图2-去imagethink-1024",
     "disabled": false,
     "runOnEdit": true,
-    "findRegex": "/<imgthink>[\\s\\S]*?<\\/imgthink>/gi",
+    "findRegex": "/\\\\?<\\s*(?:imgthink|imagethink)\\s*\\\\?>[\\s\\S]*?(?:\\\\?<\\s*\\\\?\\/\\s*(?:imgthink|imagethink)\\s*\\\\?>|$)/gi",
     "trimStrings": [],
     "replaceString": "",
     "placement": [
@@ -52,9 +52,9 @@
   },
   {
     "id": "80b95c4d-ed3c-497d-9723-e112dc881e5d",
-    "scriptName": "喵喵文生图4-彩蛋介绍美化-0820",
-    "findRegex": "/<easter_egg>\\s*([\\s\\S]*?)\\s*<\\/easter_egg>/gi",
-    "replaceString": "<div style=\"\n  width: 88%;\n  margin: 0.8em auto 0.4em;\n  text-align: center;\n  color: currentColor;\n  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', 'PingFang SC', sans-serif;\n  font-size: 0.68em;\n  line-height: 1.7;\n  letter-spacing: 0.05em;\n  font-style: italic;\n  opacity: 0.48;\n  box-sizing: border-box;\n\">\n  $1\n</div>",
+    "scriptName": "喵喵文生图4-彩蛋介绍美化-1024",
+    "findRegex": "/^[\\t ]*\\x60{3}(?:html|xml)?[\\t ]*\\r?\\n\\s*\\\\?<\\s*easter[_-]egg\\s*\\\\?>\\s*((?:(?!\\\\?<\\s*easter[_-]egg\\s*\\\\?>)[\\s\\S])*?)\\s*\\\\?<\\s*\\\\?\\/\\s*easter[_-]egg\\s*\\\\?>[\\t ]*\\r?\\n[\\t ]*\\x60{3}[\\t ]*(?=\\r?$)|\\\\?<\\s*easter[_-]egg\\s*\\\\?>\\s*((?:(?!\\\\?<\\s*easter[_-]egg\\s*\\\\?>)[\\s\\S])*?)\\s*\\\\?<\\s*\\\\?\\/\\s*easter[_-]egg\\s*\\\\?>/gim",
+    "replaceString": "<div style=\"\n  width: 88%;\n  margin: 0.8em auto 0.4em;\n  text-align: center;\n  color: currentColor;\n  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', 'PingFang SC', sans-serif;\n  font-size: 0.68em;\n  line-height: 1.7;\n  letter-spacing: 0.05em;\n  font-style: italic;\n  opacity: 0.48;\n  box-sizing: border-box;\n\">\n  $1$2\n</div>",
     "trimStrings": [],
     "placement": [
       2

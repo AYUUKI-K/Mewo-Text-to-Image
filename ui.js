@@ -1,6 +1,7 @@
 import {validateQueueURL} from './cloud-queue.js';
 import {sizePresets,pageItems,defaults,compareImagesNewest} from './core.js';
 import {vibeModelKeys} from './vibe.js';
+import {RESOURCE_VERSION} from './resources.js';
 const models=[['nai-diffusion-4-5-full','V4.5 Full'],['nai-diffusion-4-5-curated','V4.5 Curated'],['nai-diffusion-4-full','V4 Full'],['nai-diffusion-4-curated-preview','V4 Curated'],['nai-diffusion-3','V3 Anime'],['nai-diffusion-furry-3','V3 Furry']];
 const node=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
 export function createSettingsPanel({settings,save,persistSettings,theme,onTheme,onChange,onError,saveKey,testImage,installDefaults,installWorld,installRegex,listImages,deleteImages,changeFolder,saveCapture,queueStatus,openImage,downloadImages,checkUpdate,installUpdate,refreshPage,listVibes,importVibeFile,encodeVibe,deleteVibe,renameVibe,directKeyStatus,clearDirectKey,setRememberDirectKey,closeSettings}) {
@@ -183,8 +184,8 @@ export function createSettingsPanel({settings,save,persistSettings,theme,onTheme
             refresh();
         } else if(activeTab==='resources') {
             const resources=section(body,'世界书与正则');
-            const status=node('div',undefined,'miao-notice');status.append(node('strong',settings.installed?'默认资源已载入':'默认资源尚未载入'),node('p',settings.world||'未选择世界书'));resources.append(status);
-            action(resources,'载入默认资源',async()=>{await installDefaults();render();},true);
+            const status=node('div',undefined,'miao-notice');status.append(node('strong',settings.resourceVersion===RESOURCE_VERSION?'内置资源 2.1 已载入':settings.installed?'资源待更新':'内置资源未载入'),node('p',settings.world||'未选择世界书'));resources.append(status);
+            action(resources,'更新资源',async()=>{await installDefaults();render();},true);
             const upload=(label,fn)=>{const file=node('input');file.type='file';file.accept='.json';file.hidden=true;file.onchange=safe(async()=>{if(file.files[0])await fn(file.files[0]);file.value='';render();});resources.append(file);action(resources,label,()=>file.click());};
             upload('导入世界书',installWorld);upload('导入正则',async f=>installRegex(JSON.parse(await f.text())));
             const capture=section(body,'捕捉标签');
@@ -250,7 +251,7 @@ export function createSettingsPanel({settings,save,persistSettings,theme,onTheme
             action(controls,'清理选中日期',async()=>{if(!selected.size)throw new Error('请先勾选需要清理的日期');await deleteImages(selectedFolder,images.filter(i=>selected.has(i.day)).map(i=>i.name));await refresh();});
             refresh();
         }
-        const footer=node('footer',undefined,'miao-footer');footer.append(node('span','by 喵喵电波-NUE','miao-credit'),node('span','喵喵文生图 · 1.1.5'),updateBox);root.append(footer);
+        const footer=node('footer',undefined,'miao-footer');footer.append(node('span','by 喵喵电波-NUE','miao-credit'),node('span','喵喵文生图 · 1.1.6'),updateBox);root.append(footer);
     }
     for(const event of ['input','change'])root.addEventListener(event,()=>{const button=root.querySelector('.miao-save-button');if(button&&!button.disabled)button.textContent='保存';});
     render();checkLatest(false);return root;

@@ -6,6 +6,7 @@ import * as hostUtils from '../../../utils.js';
 import {bindImageGesture,createFloatingEntry} from './interactions.js';
 import {persistHostSettings} from './settings-save.js';
 import {createPromptTranslator} from './translation.js';
+import {RESOURCE_VERSION,mergeWorldEntries,mergeRegexRules,bundledWorldTargets} from './resources.js';
 import { writeSecret, SECRET_KEYS } from '../../../secrets.js';
 import { getCurrentUserHandle } from '../../../user.js';
 import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
@@ -52,6 +53,7 @@ let chatObserver,chatRootObserver,observedChat,imageSaves=0;
 let queue=Promise.resolve(), streamActive=false, timer, autoScheduled=false, generationChat=null, settingsHost=null,imageToolsEpoch=0;
 let settingsPopup=null,autoSession=null,floatingDispose=()=>{},lastGestureReroll=0;
 const save=()=>ctx().saveSettingsDebounced();
+const persistSettings=()=>persistHostSettings({saveNow:async()=>{const host=await import('../../../../script.js');return host.saveSettings();},source:ctx().eventSource,event:ctx().eventTypes.SETTINGS_UPDATED});
 const directUser=getCurrentUserHandle(),directVault=createKeyVault(directUser);
 const direct=createDirectClient({settings,save,getHeaders:()=>ctx().getRequestHeaders(),getKey:async()=>{
     if(getCurrentUserHandle()!==directUser)throw Error('酒馆用户已切换，请刷新页面后重试');
@@ -336,29 +338,38 @@ function observeChat(){
     if(!chatObserver)chatObserver=new MutationObserver(()=>scheduleRender(false));
     observedChat=root;chatObserver.observe(observedChat,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['src','mesid']});
 }
-async function installWorld(file) {
+async function installWorld(file,{targetName,activate=true}={}) {
     const data=JSON.parse(await file.text());if(!data.entries)throw new Error('世界书需要 entries 字段');
-    const name=file.name.replace(/\.json$/i,'');
-    if(!wi.world_names.includes(name))await wi.importWorldInfo(file);
-    if(!wi.world_names.includes(name))throw new Error('世界书导入失败');
-    if(!wi.selected_world_info.includes(name))wi.onWorldInfoChange({state:'on',silent:'true'},name);
+    const name=targetName||file.name.replace(/\.json$/i,'');
+    const previous=wi.world_names.includes(name)?await wi.loadWorldInfo(name):{entries:{}};
+    if(!previous)throw Error('无法读取原世界书，请重试');
+    const merged=mergeWorldEntries(previous,data);
+    const response=await fetch('/api/worldinfo/edit',{method:'POST',headers:ctx().getRequestHeaders(),body:JSON.stringify({name,data:merged})});
+    if(!response.ok)throw Error(`世界书更新失败：HTTP ${response.status}`);
+    wi.worldInfoCache?.set(name,merged);await wi.updateWorldInfoList();
+    if(!wi.world_names.includes(name))throw new Error('世界书列表刷新失败');
+    if(ctx().eventTypes.WORLDINFO_UPDATED)await ctx().eventSource.emit(ctx().eventTypes.WORLDINFO_UPDATED,name,merged);
+    if(activate&&!wi.selected_world_info.includes(name))wi.onWorldInfoChange({state:'on',silent:'true'},name);
     settings.world=name;save();
 }
 async function installRegex(rules) {
-    const list=Array.isArray(rules)?rules:[rules];
-    for(const rule of list) {
-        if(!rule.findRegex||typeof rule.replaceString!=='string')throw new Error('不是有效的酒馆正则文件');
-    }
     const existing=getScriptsByType(SCRIPT_TYPES.GLOBAL,{allowedOnly:false});
-    const merged=[...existing];
-    for(const rule of list)if(!merged.some(r=>r.id===rule.id||r.scriptName===rule.scriptName))merged.push({...rule,id:rule.id||crypto.randomUUID()});
-    await saveScriptsByType(merged,SCRIPT_TYPES.GLOBAL);
+    await saveScriptsByType(mergeRegexRules(existing,rules),SCRIPT_TYPES.GLOBAL);
 }
 async function installDefaults() {
-    const [w,r]=await Promise.all([fetch(new URL('assets/worldbook.json',base)),fetch(new URL('assets/regex.json',base))]);
+    const [w,r]=await Promise.all([fetch(new URL('assets/worldbook.json',base),{cache:'no-store'}),fetch(new URL('assets/regex.json',base),{cache:'no-store'})]);
     if(!w.ok||!r.ok)throw new Error('内置资源读取失败');
-    await installWorld(new File([await w.text()],'[喵喵]文生图 2.0.json',{type:'application/json'}));
-    await installRegex(await r.json());settings.installed=true;save();
+    const world=await w.text(),rules=await r.json();
+    // Validate the entire pack before the first write.
+    mergeWorldEntries({entries:{}},JSON.parse(world));mergeRegexRules([],rules);
+    const targets=bundledWorldTargets(wi.world_names,settings.world);
+    for(const name of targets)await installWorld(new File([world],name+'.json',{type:'application/json'}),{targetName:name,activate:!wi.world_names.includes(name)});
+    settings.world=targets[0];
+    await installRegex(rules);
+    const previous={installed:settings.installed,resourceVersion:settings.resourceVersion};
+    settings.installed=true;settings.resourceVersion=RESOURCE_VERSION;
+    try{await persistSettings();}catch(error){Object.assign(settings,previous);throw error;}
+    save();renderAll();toastr.success('资源已更新','喵喵文生图');
 }
 function resolvedTheme(){return 'host';}
 function applyTheme() {
@@ -484,7 +495,7 @@ async function deleteImages(folder,names) {
 }
 async function openSettings() {
     if(settingsHost?.isConnected)return;
-    const panel=createSettingsPanel({settings,save,persistSettings:()=>persistHostSettings({saveNow:async()=>{const host=await import('../../../../script.js');return host.saveSettings();},source:ctx().eventSource,event:ctx().eventTypes.SETTINGS_UPDATED}),theme:resolvedTheme,onTheme:applyTheme,onError:errorPopup,
+    const panel=createSettingsPanel({settings,save,persistSettings,theme:resolvedTheme,onTheme:applyTheme,onError:errorPopup,
         onChange:async action=>{
             if(action==='confirm-delete')return Boolean(await showPopup('删除当前配置？',POPUP_TYPE.CONFIRM));
             autoSession=null;refreshFloating();renderAll();
