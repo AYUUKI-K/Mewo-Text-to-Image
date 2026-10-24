@@ -1,4 +1,6 @@
 import {importVibeData,resolveVibes,vibeSummary,vibeModelKeys,stripImage} from './vibe.js';
+import {randomId} from './browser-crypto.js';
+import {hostFetch} from './host-fetch.js';
 
 export function base64Bytes(bytes){let binary='';for(let i=0;i<bytes.length;i+=32768)binary+=String.fromCharCode(...bytes.subarray(i,i+32768));return btoa(binary);}
 export function naiPayload(request,references={}){
@@ -9,7 +11,7 @@ export function createDirectClient({settings,save,getHeaders,getKey,unzipPNG,fet
     const filename=id=>{if(!/^[a-f0-9-]{36}$/i.test(id||''))throw Error('无效 Vibe ID');return `miao-vibe-${id}.json`;};
     const filePath=id=>'/user/files/'+filename(id);
     const st=async(endpoint,body)=>{
-        const response=await fetchImpl('/api/files/'+endpoint,{method:'POST',headers:getHeaders(),body:JSON.stringify(body)});
+        const response=await hostFetch('/api/files/'+endpoint,{method:'POST',headers:getHeaders(),body:JSON.stringify(body)},{fetchImpl});
         if(!response.ok)throw Error(`酒馆文件接口 HTTP ${response.status}，请更新酒馆后重试`);return response;
     };
     const read=async id=>{
@@ -29,14 +31,14 @@ export function createDirectClient({settings,save,getHeaders,getKey,unzipPNG,fet
         let response;
         try{response=await fetchImpl('https://image.novelai.net/ai/'+endpoint,{method:'POST',credentials:'omit',referrerPolicy:'no-referrer',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(180000)});}
         catch(error){if(error.name==='TypeError'){const friendly=Error('无法从当前设备连接 NovelAI，请检查设备网络。请求结果不确定，不会自动重试。');friendly.name='TypeError';throw friendly;}throw error;}
-        if(!response.ok){const text=(await response.text()).split(key).join('[已隐藏]');throw Error(`NAI HTTP ${response.status}\n${text.slice(0,1200)}`);}return response;
+        if(!response.ok){const text=(await response.text()).split(key).join('[已隐藏]');throw Object.assign(Error(`NAI HTTP ${response.status}\n${text.slice(0,1200)}`),{status:response.status});}return response;
     };
     return {
         async list(){return structuredClone(settings.vibeLibrary);},
         async import({data,name,image}){
             const items=image?importVibeData({name,image:stripImage(image),encodings:{}},name):importVibeData(data,name);
             if(settings.vibeLibrary.length+items.length>128)throw Error('最多保存 128 个 Vibe，请先清理列表');
-            const saved=[];for(const item of items){item.id=crypto.randomUUID();saved.push(await write(item));}return saved;
+            const saved=[];for(const item of items){item.id=randomId();saved.push(await write(item));}return saved;
         },
         async rename({id,name}){const item=await read(id);item.name=String(name||'Vibe').slice(0,100);return write(item);},
         async delete(id){await st('delete',{path:filePath(id)});settings.vibeLibrary=settings.vibeLibrary.filter(item=>item.id!==id);save();},

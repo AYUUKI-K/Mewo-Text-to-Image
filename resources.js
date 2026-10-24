@@ -1,3 +1,4 @@
+import {randomId} from './browser-crypto.js';
 export const RESOURCE_VERSION='2.1-1024';
 export const WORLD_NAME='[喵喵]文生图 2.1';
 const validEntries=book=>book&&book.entries&&typeof book.entries==='object'&&!Array.isArray(book.entries)&&Object.values(book.entries).every(entry=>entry&&typeof entry==='object'&&!Array.isArray(entry));
@@ -18,7 +19,7 @@ export function mergeWorldEntries(existing,incoming){
     return {...structuredClone(existing),...structuredClone(incoming),entries};
 }
 const regexFamily=name=>/^喵喵文生图[1-4]-/.test(name||'')?name.replace(/-\d{4}$/,''):null;
-export function mergeRegexRules(existing,incoming,makeId=()=>crypto.randomUUID()){
+export function mergeRegexRules(existing,incoming,makeId=randomId){
     const list=Array.isArray(incoming)?incoming:[incoming];
     for(const rule of list)if(!rule||typeof rule.findRegex!=='string'||!rule.findRegex||typeof rule.replaceString!=='string')throw Error('不是有效的酒馆正则文件');
     let merged=structuredClone(existing);
