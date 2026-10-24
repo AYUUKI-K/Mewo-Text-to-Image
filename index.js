@@ -170,6 +170,10 @@ function makeCard(message,block) {
     const button=(label,fn,parent=actions)=>{const b=el('button',label,'miao-button');b.type='button';b.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();guard(fn)();});parent.append(b);return b;};
     if(current?.url&&!current.deleted){
         const image=el('img');image.src=current.url;image.alt='生成的剧情插图';image.loading='lazy';image.draggable=false;image.tabIndex=0;image.setAttribute('role','button');image.setAttribute('aria-label','单击图片显示选项，双击重新生成');
+        const setRatio=(width,height)=>{if(width>0&&height>0&&Number.isFinite(width/height))card.style.setProperty('--miao-image-ratio',String(width/height));};
+        setRatio(current.request?.width,current.request?.height);
+        image.addEventListener('load',()=>setRatio(image.naturalWidth,image.naturalHeight));
+        if(image.complete)setRatio(image.naturalWidth,image.naturalHeight);
         image.setAttribute('aria-label',`单击图片显示选项，${settings.rerollClicks===3?'三':'双'}击重新生成`);
         const cancelGesture=bindImageGesture(image,{getClicks:()=>settings.rerollClicks===3?3:2,
             onSingle:()=>{if(image.isConnected&&image.dataset.toolsEpoch===String(imageToolsEpoch))actions.hidden=!actions.hidden;},
