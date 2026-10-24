@@ -2,6 +2,7 @@ import {fingerprintKey,runWithQueue,validateQueueURL} from './cloud-queue.js';
 import {randomId} from './browser-crypto.js';
 import {retryGeneration} from './generation-retry.js';
 import {hostFetch} from './host-fetch.js';
+import {bindButtonPress} from './button-press.js';
 import { getContext, extension_settings } from '../../../extensions.js';
 import * as extensionAPI from '../../../extensions.js';
 import { saveBase64AsFile } from '../../../utils.js';
@@ -99,6 +100,9 @@ async function confirmSettings(question,title='确认删除'){
     if(standalone){
         body.append(content);dialog.append(body);document.body.append(dialog);
     }
+    const viewport=window.visualViewport;
+    const fitConfirm=()=>{if(!standalone)return;for(const [name,value] of Object.entries({left:viewport?.offsetLeft||0,top:viewport?.offsetTop||0,width:viewport?.width||innerWidth,height:viewport?.height||innerHeight}))dialog.style.setProperty('--miao-confirm-'+name,value+'px');};
+    fitConfirm();if(standalone){viewport?.addEventListener('resize',fitConfirm);viewport?.addEventListener('scroll',fitConfirm);window.addEventListener('resize',fitConfirm);}
     const layer=el('div',undefined,'miao-confirmation-layer'),card=el('section',undefined,'miao-confirmation-card');
     card.setAttribute('role','alertdialog');card.setAttribute('aria-modal','true');
     const heading=el('h3',title);heading.id='miao-confirmation-title';card.setAttribute('aria-labelledby',heading.id);card.append(heading);
@@ -115,6 +119,7 @@ async function confirmSettings(question,title='确认删除'){
             dialog.removeEventListener('keydown',onKey,true);dialog.removeEventListener('cancel',onCancel,true);dialog.removeEventListener('close',onClose);
             layer.remove();content.inert=wasInert;delete dialog.dataset.miaoConfirming;
             if(standalone)dialog.remove();
+            viewport?.removeEventListener('resize',fitConfirm);viewport?.removeEventListener('scroll',fitConfirm);window.removeEventListener('resize',fitConfirm);
             const focus=previousFocus?.isConnected&&!previousFocus.disabled?previousFocus:settingsHost?.querySelector('.miao-drawer-close');focus?.focus();if(error)reject(error);else resolve(result);
         };
         const onKey=event=>{
@@ -124,7 +129,7 @@ async function confirmSettings(question,title='确认删除'){
             else if(event.key==='Enter'||event.key===' ')finish(document.activeElement===confirm);
         };
         const onCancel=event=>{event.preventDefault();event.stopImmediatePropagation();finish(false);},onClose=()=>finish(false);
-        pendingSettingsConfirm=finish;cancel.onclick=()=>finish(false);confirm.onclick=()=>finish(true);
+        pendingSettingsConfirm=finish;bindButtonPress(cancel,()=>finish(false));bindButtonPress(confirm,()=>finish(true));
         dialog.addEventListener('keydown',onKey,true);dialog.addEventListener('cancel',onCancel,true);dialog.addEventListener('close',onClose);cancel.focus();
         if(standalone)cancel.focus();
     });
@@ -215,7 +220,7 @@ function makeCard(message,block) {
     const task=taskFor(message,block);
     const versions=imageVersions(record),wanted=Math.min(record?.selected??versions.length-1,versions.length-1),selected=versions[wanted]?.deleted?versions.findLastIndex(v=>!v.deleted):wanted,current=versions[selected];
     const actions=el('div',undefined,'miao-image-tools');actions.hidden=true;
-    const button=(label,fn,parent=actions)=>{const b=el('button',label,'miao-button');b.type='button';b.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();guard(fn)();});parent.append(b);return b;};
+    const button=(label,fn,parent=actions)=>{const b=el('button',label,'miao-button');b.type='button';if(label==='删除')bindButtonPress(b,()=>guard(fn)());else b.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();guard(fn)();});parent.append(b);return b;};
     if(current?.url&&!current.deleted){
         const image=el('img');image.src=current.url;image.alt='生成的剧情插图';image.loading='lazy';image.draggable=false;image.tabIndex=0;image.setAttribute('role','button');image.setAttribute('aria-label','单击图片显示选项，双击重新生成');
         const setRatio=(width,height)=>{if(width>0&&height>0&&Number.isFinite(width/height))card.style.setProperty('--miao-image-ratio',String(width/height));};

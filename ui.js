@@ -1,4 +1,5 @@
 import {validateQueueURL} from './cloud-queue.js';
+import {bindButtonPress} from './button-press.js';
 import {sizePresets,pageItems,defaults,compareImagesNewest} from './core.js';
 import {vibeModelKeys} from './vibe.js';
 import {RESOURCE_VERSION} from './resources.js';
@@ -26,7 +27,7 @@ export function createSettingsPanel({settings,save,persistSettings,theme,onTheme
     async function checkLatest(force=false){updateBusy=true;paintUpdate();try{updateData=await checkUpdate(force);}catch(error){updateError=error.message;}finally{updateBusy=false;paintUpdate();}}
     function action(parent,label,fn,primary=false) {
         const b=node('button',label,`miao-button${primary?' miao-primary':''}`);b.type='button';
-        b.onclick=safe(async()=>{if(b.disabled)return;b.disabled=true;try{await fn();}finally{b.disabled=false;}});parent.append(b);return b;
+        const invoke=safe(async()=>{if(b.disabled)return;b.disabled=true;try{await fn();}finally{b.disabled=false;}});if(/^(删除|清理)/.test(label))bindButtonPress(b,invoke);else b.onclick=invoke;parent.append(b);return b;
     }
     function field(parent,label,value,change,{type='text',options,wide=false}={}) {
         const wrap=node('label',undefined,`miao-field${wide?' miao-wide':''}`);wrap.append(node('span',label));
@@ -218,7 +219,7 @@ export function createSettingsPanel({settings,save,persistSettings,theme,onTheme
             const imageControls=node('div',undefined,'miao-history-selection');cleanup.append(imageControls);
             const selectionCount=node('span','已选 0 张','miao-muted');imageControls.append(selectionCount);
             const removeSelected=node('button','删除选中图片','miao-button');removeSelected.type='button';removeSelected.disabled=true;imageControls.append(removeSelected);
-            removeSelected.onclick=safe(async()=>{removeSelected.disabled=true;try{if(await deleteImages(selectedFolder,[...selectedImages]))await refresh();}finally{updateSelection();}});
+            bindButtonPress(removeSelected,safe(async()=>{if(removeSelected.disabled)return;removeSelected.disabled=true;try{if(await deleteImages(selectedFolder,[...selectedImages]))await refresh();}finally{updateSelection();}}));
             const downloadSelected=node('button','下载选中图片','miao-button');downloadSelected.type='button';downloadSelected.disabled=true;imageControls.insertBefore(downloadSelected,removeSelected);
             let downloading=false;
             downloadSelected.onclick=safe(async()=>{if(downloading)return;downloading=true;downloadSelected.textContent='正在下载…';updateSelection();try{await downloadImages(images.filter(image=>selectedImages.has(image.name)));}finally{downloading=false;downloadSelected.textContent='下载选中图片';updateSelection();}});
@@ -259,7 +260,7 @@ export function createSettingsPanel({settings,save,persistSettings,theme,onTheme
             action(controls,'清理选中日期',async()=>{if(!selected.size)throw new Error('请先勾选需要清理的日期');if(await deleteImages(selectedFolder,images.filter(i=>selected.has(i.day)).map(i=>i.name)))await refresh();});
             refresh();
         }
-        const footer=node('footer',undefined,'miao-footer');footer.append(node('span','by 喵喵电波-NUE','miao-credit'),node('span','喵喵文生图 · 1.2.1'),updateBox);root.append(footer);
+        const footer=node('footer',undefined,'miao-footer');footer.append(node('span','by 喵喵电波-NUE','miao-credit'),node('span','喵喵文生图 · 1.2.2'),updateBox);root.append(footer);
     }
     for(const event of ['input','change'])root.addEventListener(event,()=>{const button=root.querySelector('.miao-save-button');if(button&&!button.disabled)button.textContent='保存';});
     render();checkLatest(false);return root;
