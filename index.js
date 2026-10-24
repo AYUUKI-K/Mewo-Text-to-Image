@@ -125,7 +125,8 @@ function startGeneration(message,block,{automatic=false}={}) {
     const key=identity(message,block), chat=currentChat(), taskId=`${chat}:${ctx().chat.indexOf(message)}:${key}`;
     if(running.has(taskId)||taskFor(message,block))return;
     message.miao_nai_image_id??=crypto.randomUUID();
-    const request=buildRequest(settings.profiles[settings.active],block.prompt);
+    const profile=settings.profiles[settings.active],profileName=profile.name;
+    const request=buildRequest(profile,block.prompt);
     request.vibes=selectVibes(settings.profiles[settings.active],settings.vibeLibrary);
     const folder=validateFolder(settings.folder);
     attempted.add(taskId);
@@ -140,7 +141,7 @@ function startGeneration(message,block,{automatic=false}={}) {
         const url=await saveBase64AsFile(data,folder,`miao-${Date.now()}-${crypto.randomUUID()}`,'png');
         // Switching swipes does not invalidate an image already being generated.
         target=taskTarget(task,true);if(!target) { toastr.info('图片已保存，但原消息已删除或修改：'+url); return; }
-        writeSwipeImage(target.message,task.swipe,blockSlot(target.block),appendImageVersion(task.previousRecord,{url,request,created:Date.now()}));
+        writeSwipeImage(target.message,task.swipe,blockSlot(target.block),appendImageVersion(task.previousRecord,{url,request,profileName,created:Date.now()}));
         // Show the result before waiting for ST's chat-save request.
         if(running.get(taskId)===task)running.delete(taskId);renderAll();
         if(task.previousRecord&&task.toolsEpoch===imageToolsEpoch&&(target.message.swipe_id??0)===task.swipe){
@@ -195,10 +196,10 @@ function makeCard(message,block) {
             const next=button('›',()=>switchTo(1),navigation);next.setAttribute('aria-label','下一张');next.title='下一张';
         }
         const operations=el('div',undefined,'miao-image-operations');actions.append(operations);
-        button('提示词',()=>showPrompt(current.request?.prompt||block.prompt,current.request?.vibes),operations).setAttribute('aria-label','查看提示词');
+        button('提示词',()=>showPrompt(current.request?.prompt||block.prompt,current.request?.vibes,current.profileName),operations).setAttribute('aria-label','查看提示词');
         button('下载',()=>downloadImage(current.url),operations).setAttribute('aria-label','下载图片');button('放大',()=>openImage(current.url),operations).setAttribute('aria-label','放大查看');
     }else if(!task){
-        actions.hidden=false;button(task?.status||'生成插图',()=>generate(message,block)).disabled=!!task;button('查看提示词',()=>showPrompt(block.prompt));
+        actions.hidden=false;button(task?.status||'生成插图',()=>generate(message,block)).disabled=!!task;button('查看提示词',()=>{const profile=settings.profiles[settings.active];return showPrompt(block.prompt,(profile.vibes||[]).map(v=>({...v,name:settings.vibeLibrary?.find(item=>item.id===v.id)?.name||v.name||v.id})),profile.name,true);});
     }
     if(task){const progress=el('span',task.status,'miao-image-progress');progress.setAttribute('role','status');card.append(progress);}
     card.dataset.status=String(selected)+':'+versions.map(v=>v.url+':'+!!v.deleted).join('|')+':'+(task?.status||'')+':'+(settings.rerollClicks===3?3:2);
@@ -289,6 +290,10 @@ function renderAll() {
         const index=mes.getAttribute('mesid');if(index===null||!/^\d+$/.test(index))return;
         const message=ctx().chat[Number(index)],root=mes.querySelector('.mes_text');
         if(!message||!root)return;
+        // The host replaces .mes_text with its editor. Never insert cards into it.
+        if(mes.querySelector('textarea.edit_textarea,#curEditTextarea')){
+            mes.querySelectorAll('.miao-image-card').forEach(card=>{card._cancelGesture?.();card.remove();});return;
+        }
         // Streaming markdown is continually rebuilt by ST. Generate in the
         // background and insert cards only after its final message render.
         if(streamActive&&generationChat===currentChat()&&message===latestImageMessage(ctx().chat))return;
@@ -407,19 +412,22 @@ async function requestImage(request,task,canContinue) {
     return generate();
 }
 const translatePrompt=createPromptTranslator({getHeaders:()=>ctx().getRequestHeaders()});
-async function showPrompt(prompt,vibes=[]){
+async function showPrompt(prompt,vibes=[],profileName='',pending=false){
     const view=el('section',undefined,'miao-prompt-view');view.append(el('h3','绘图提示词'),el('pre',prompt));
-    if(vibes.length)view.append(el('p','本张 Vibe：'+vibes.map(v=>v.name||v.id).join('、'),'miao-muted'));
+    const metadata=el('div',undefined,'miao-prompt-metadata');metadata.append(el('span',(pending?'当前配置：':'配置：')+(profileName||'未记录')),el('span',(pending?'Vibe 候选：':'Vibe：')+(vibes.length?vibes.map(v=>v.name||v.id).join('、'):pending?'未选择':'未使用')));view.append(metadata);
     const button=el('button','Google 翻译为中文','miao-button');button.type='button';
-    const note=el('p','','miao-muted');note.setAttribute('role','status');
+    const note=el('p','','miao-muted');note.setAttribute('role','status');note.hidden=true;
     const fallback=el('a','在 Google 翻译中打开');fallback.href='https://translate.google.com/?'+new URLSearchParams({sl:'auto',tl:'zh-CN',text:prompt,op:'translate'});fallback.target='_blank';fallback.rel='noopener noreferrer';fallback.hidden=true;
+    const alternative=el('button','改用 Microsoft 翻译','miao-button');alternative.type='button';alternative.hidden=true;
     const translated=el('pre');translated.hidden=true;translated.setAttribute('aria-live','polite');
-    button.onclick=async()=>{if(button.disabled)return;button.disabled=true;button.textContent='翻译中…';note.textContent='';fallback.hidden=true;try{
-        const result=await translatePrompt(prompt,(index,total)=>{button.textContent=total>1?`翻译中 ${index}/${total}`:'翻译中…';});
+    const runTranslation=async(provider='google')=>{if(button.disabled)return;button.disabled=alternative.disabled=true;button.textContent='翻译中…';note.textContent='';note.hidden=fallback.hidden=alternative.hidden=true;let failed=false;try{
+        const result=await translatePrompt(prompt,(index,total)=>{button.textContent=total>1?`翻译中 ${index}/${total}`:'翻译中…';},{provider});
         translated.textContent=result;translated.hidden=false;
-    }catch(error){note.textContent=['TimeoutError','AbortError'].includes(error.name)?'翻译超时，请重试':error instanceof TypeError?'翻译连接失败，请重试':String(error.message||error);fallback.hidden=false;
-    }finally{button.disabled=false;button.textContent=note.textContent?'重试翻译':'Google 翻译为中文';}};
-    view.append(button,note,fallback,translated);await showPopup(view,POPUP_TYPE.TEXT,'',{wide:true,onOpen:popup=>popup.dlg.classList.add('miao-content-dialog')});
+        note.textContent=provider==='bing'?'Microsoft 翻译':'';note.hidden=provider!=='bing';
+    }catch(error){failed=true;note.textContent=['TimeoutError','AbortError'].includes(error.name)?'翻译超时，请重试':error instanceof TypeError?'翻译连接失败，请重试':String(error.message||error);note.hidden=fallback.hidden=false;alternative.hidden=isTT();
+    }finally{button.disabled=alternative.disabled=false;button.textContent=failed?'重试 Google 翻译':'Google 翻译为中文';}};
+    button.onclick=()=>runTranslation();alternative.onclick=()=>runTranslation('bing');
+    view.append(button,note,alternative,fallback,translated);await showPopup(view,POPUP_TYPE.TEXT,'',{wide:true,onOpen:popup=>popup.dlg.classList.add('miao-content-dialog')});
 }
 async function importVibeFile(file){
     if(file.size>18*1024*1024)throw Error('文件不能超过 18 MB');
@@ -526,7 +534,7 @@ async function init() {
     document.addEventListener('click',event=>{
         if(event.target.closest?.('.miao-image-card>img,.miao-image-tools'))return;
         imageToolsEpoch++;
-        document.querySelectorAll('.miao-image-tools').forEach(tools=>{tools.hidden=true;});
+        document.querySelectorAll('.miao-image-tools').forEach(tools=>{if(tools.closest('.miao-image-card')?.querySelector('img'))tools.hidden=true;});
         document.querySelectorAll('.miao-image-card').forEach(card=>card._cancelGesture?.());
     });
     for(const name of ['CHAT_LOADED','MORE_MESSAGES_LOADED','USER_MESSAGE_RENDERED','MESSAGE_RECEIVED','CHARACTER_MESSAGE_RENDERED','MESSAGE_UPDATED','MESSAGE_SWIPED','MESSAGE_EDITED'])if(c.eventTypes[name])c.eventSource.on(c.eventTypes[name],messageId=>{

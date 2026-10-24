@@ -55,3 +55,13 @@ test('network failure retries once and HTML/empty responses never enter the cach
         await assert.rejects(invalid('cat'),/有效译文/);assert.equal(await invalid('cat'),'恢复');
     }
 });
+test('Microsoft translation requires an explicit provider choice and has a separate cache',async()=>{
+    const calls=[];
+    const client=createPromptTranslator({getHeaders:()=>({}),fetchImpl:async url=>{calls.push(url);return new Response(url.endsWith('/bing')?'微软译文':'谷歌译文');}});
+    assert.equal(await client('cat'),'谷歌译文');
+    assert.deepEqual(calls,['/api/translate/google']);
+    assert.equal(await client('cat',undefined,{provider:'bing'}),'微软译文');
+    assert.equal(await client('cat'),'谷歌译文');
+    assert.deepEqual(calls,['/api/translate/google','/api/translate/bing']);
+    await assert.rejects(client('cat',undefined,{provider:'other'}),/不支持/);
+});

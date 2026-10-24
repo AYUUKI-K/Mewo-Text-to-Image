@@ -94,13 +94,14 @@ export function createSettingsPanel({settings,save,persistSettings,theme,onTheme
                 row.onclick=()=>{activeTab=id;render();root.closest('.popup-content')?.scrollTo({top:0});};overview.append(row);
             }
         } else if(activeTab==='generation') {
-            const interaction=section(body,'操作');
+            const layout=node('div',undefined,'miao-generation-layout'),preferences=node('div',undefined,'miao-generation-column'),account=node('div',undefined,'miao-generation-column');layout.append(preferences,account);body.append(layout);
+            const interaction=section(preferences,'操作');
             field(interaction,'悬浮入口',settings.floatingEntry?'floating':'menu',v=>{settings.floatingEntry=v==='floating';save();onChange();},{options:[['menu','关闭'],['floating','开启']]});
             field(interaction,'重新生图',String(settings.rerollClicks===3?3:2),v=>{settings.rerollClicks=Number(v);save();onChange();},{options:[['2','双击'],['3','三击']]});
-            const main=section(body,'生成方式');
+            const main=section(preferences,'生成方式');
             const toggle=node('label',undefined,'miao-switch-row');const checkbox=node('input');checkbox.type='checkbox';checkbox.checked=settings.enabled;checkbox.onchange=()=>{settings.enabled=checkbox.checked;save();onChange();};toggle.append(node('span','启用自动生图'),checkbox);main.append(toggle);
             field(main,'生成模式',settings.mode,v=>{settings.mode=v;save();onChange(true);render();},{options:[['manual','手动'],['auto','回复后生成'],['stream','流式生成']]});
-            const connection=section(body,'连接 NovelAI');
+            const connection=section(account,'连接 NovelAI');
 
             const key=field(connection,'API Key','',()=>{},{type:'password'});key.autocomplete='new-password';key.placeholder='输入你的 NovelAI Key';
             const remember=node('label',undefined,'miao-switch-row'),rememberCheck=node('input');rememberCheck.type='checkbox';rememberCheck.checked=!!settings.rememberDirectKey;rememberCheck.onchange=safe(async()=>{try{await setRememberDirectKey(rememberCheck.checked);}finally{rememberCheck.checked=!!settings.rememberDirectKey;await updateKeyState();}});remember.append(node('span','记住 Key'),rememberCheck);connection.append(remember);
@@ -113,7 +114,7 @@ export function createSettingsPanel({settings,save,persistSettings,theme,onTheme
             const actions=node('div',undefined,'miao-actions');connection.append(actions);action(actions,'保存密钥',async()=>{try{await saveKey(key.value===mask?'':key.value.trim());key.value='';}finally{await updateKeyState();}},true);action(actions,'测试生成',testImage);
             action(connection,'清除 Key',async()=>{await clearDirectKey();await updateKeyState();});
             commitPage=async()=>{if(key.value.trim()&&key.value!==mask){await saveKey(key.value.trim());key.value='';await updateKeyState();}};
-            const queue=section(body,'共享 Key 排队');
+            const queue=section(account,'共享 Key 排队');
             const queueToggle=node('label',undefined,'miao-switch-row'),queueCheck=node('input');queueCheck.type='checkbox';queueCheck.checked=settings.cloudQueue;queueCheck.onchange=()=>{settings.cloudQueue=queueCheck.checked;save();};queueToggle.append(node('span','启用云端排队'),queueCheck);queue.append(queueToggle);
             field(queue,'队列服务地址',settings.queueUrl,v=>{settings.queueUrl=v.trim();save();}).placeholder='https://miao-image-queue.savlu329.workers.dev';
             const status=node('p',settings.keyHash?'Key 已就绪':'未设置 Key','miao-muted');queue.append(status);
@@ -249,7 +250,7 @@ export function createSettingsPanel({settings,save,persistSettings,theme,onTheme
             action(controls,'清理选中日期',async()=>{if(!selected.size)throw new Error('请先勾选需要清理的日期');await deleteImages(selectedFolder,images.filter(i=>selected.has(i.day)).map(i=>i.name));await refresh();});
             refresh();
         }
-        const footer=node('footer',undefined,'miao-footer');footer.append(node('span','by 喵喵电波-NUE','miao-credit'),node('span','喵喵文生图 · 1.1.2'),updateBox);root.append(footer);
+        const footer=node('footer',undefined,'miao-footer');footer.append(node('span','by 喵喵电波-NUE','miao-credit'),node('span','喵喵文生图 · 1.1.3'),updateBox);root.append(footer);
     }
     for(const event of ['input','change'])root.addEventListener(event,()=>{const button=root.querySelector('.miao-save-button');if(button&&!button.disabled)button.textContent='保存';});
     render();checkLatest(false);return root;

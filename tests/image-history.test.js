@@ -13,3 +13,12 @@ test('previous and next update the live record, survive serialization and skip d
  assert.equal(selectImageVersion({versions:[{url:'gone.png',deleted:true}]},1),null);
 });
 test('more than four Vibes rejected before image generation',()=>{assert.throws(()=>resolveVibes('nai-diffusion-4-5-full',Array.from({length:5},()=>({id:'a',key:'a'})),[]),/4/);});
+test('each version keeps its profile name through selection, JSON reload and legacy records',()=>{
+ let record=appendImageVersion({url:'one.png',profileName:'配置 A',request:{vibes:[{name:'Vibe A'}]}},{url:'two.png',profileName:'配置 B',request:{vibes:[{name:'Vibe B'}]}});
+ record=JSON.parse(JSON.stringify(record));
+ assert.equal(selectImageVersion(record,-1).profileName,'配置 A');
+ assert.equal(record.request.vibes[0].name,'Vibe A');
+ assert.equal(selectImageVersion(record,1).profileName,'配置 B');
+ const old=appendImageVersion({url:'legacy.png',request:{}},{url:'new.png',profileName:'配置 C',request:{}});
+ assert.equal(selectImageVersion(old,-1).profileName,undefined);
+});

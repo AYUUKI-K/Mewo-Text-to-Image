@@ -15,13 +15,14 @@ export function splitTranslationText(text,limit=1800){
 }
 export function createPromptTranslator({getHeaders,fetchImpl=fetch,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms))}){
     const cache=new Map(),pending=new Map();
-    async function translateChunk(text){
-        if(cache.has(text))return cache.get(text);
-        if(pending.has(text))return pending.get(text);
+    async function translateChunk(text,provider){
+        const key=provider+'\0'+text;
+        if(cache.has(key))return cache.get(key);
+        if(pending.has(key))return pending.get(key);
         const task=(async()=>{
             for(let attempt=0;attempt<2;attempt++){
                 try{
-                    const response=await fetchImpl('/api/translate/google',{method:'POST',headers:getHeaders(),body:JSON.stringify({text,lang:'zh-CN'}),signal:AbortSignal.timeout(15000)});
+                    const response=await fetchImpl(provider==='bing'?'/api/translate/bing':'/api/translate/google',{method:'POST',headers:getHeaders(),body:JSON.stringify({text,lang:'zh-CN'}),signal:AbortSignal.timeout(15000)});
                     if(!response.ok){
                         const error=Error(`翻译失败（HTTP ${response.status}）`);
                         error.retryable=[408,429,500,502,503,504].includes(response.status);throw error;
@@ -29,7 +30,7 @@ export function createPromptTranslator({getHeaders,fetchImpl=fetch,wait=ms=>new 
                     const result=await response.text();
                     if(!result.trim()||/^\s*(?:<!doctype|<html)/i.test(result))throw Error('未收到有效译文');
                     if(cache.size>=50)cache.delete(cache.keys().next().value);
-                    cache.set(text,result);return result;
+                    cache.set(key,result);return result;
                 }catch(error){
                     const retryable=error.retryable||error instanceof TypeError||['TimeoutError','AbortError'].includes(error.name);
                     if(attempt||!retryable)throw error;
@@ -37,13 +38,14 @@ export function createPromptTranslator({getHeaders,fetchImpl=fetch,wait=ms=>new 
                 }
             }
         })();
-        pending.set(text,task);
-        try{return await task;}finally{pending.delete(text);}
+        pending.set(key,task);
+        try{return await task;}finally{pending.delete(key);}
     }
-    return async(text,onProgress=()=>{})=>{
+    return async(text,onProgress=()=>{},{provider='google'}={})=>{
+        if(!['google','bing'].includes(provider))throw Error('不支持的翻译服务');
         const chunks=splitTranslationText(text),results=[];
         for(const [index,chunk] of chunks.entries()){
-            onProgress(index+1,chunks.length);results.push(await translateChunk(chunk));
+            onProgress(index+1,chunks.length);results.push(await translateChunk(chunk,provider));
         }
         return results.join('\n');
     };
