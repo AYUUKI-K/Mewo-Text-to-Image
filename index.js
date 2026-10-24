@@ -6,7 +6,7 @@ import * as hostUtils from '../../../utils.js';
 import {bindImageGesture,createFloatingEntry} from './interactions.js';
 import {persistHostSettings} from './settings-save.js';
 import {createPromptTranslator} from './translation.js';
-import {RESOURCE_VERSION,mergeWorldEntries,mergeRegexRules,bundledWorldTargets} from './resources.js';
+import {RESOURCE_VERSION,WORLD_NAME,mergeWorldEntries,mergeRegexRules,bundledWorldTargets,migrateWorldBindings} from './resources.js';
 import { writeSecret, SECRET_KEYS } from '../../../secrets.js';
 import { getCurrentUserHandle } from '../../../user.js';
 import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
@@ -338,10 +338,10 @@ function observeChat(){
     if(!chatObserver)chatObserver=new MutationObserver(()=>scheduleRender(false));
     observedChat=root;chatObserver.observe(observedChat,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['src','mesid']});
 }
-async function installWorld(file,{targetName,activate=true}={}) {
+async function installWorld(file,{targetName,activate=true,existing}={}) {
     const data=JSON.parse(await file.text());if(!data.entries)throw new Error('世界书需要 entries 字段');
     const name=targetName||file.name.replace(/\.json$/i,'');
-    const previous=wi.world_names.includes(name)?await wi.loadWorldInfo(name):{entries:{}};
+    const previous=existing??(wi.world_names.includes(name)?await wi.loadWorldInfo(name):{entries:{}});
     if(!previous)throw Error('无法读取原世界书，请重试');
     const merged=mergeWorldEntries(previous,data);
     const response=await fetch('/api/worldinfo/edit',{method:'POST',headers:ctx().getRequestHeaders(),body:JSON.stringify({name,data:merged})});
@@ -356,6 +356,34 @@ async function installRegex(rules) {
     const existing=getScriptsByType(SCRIPT_TYPES.GLOBAL,{allowedOnly:false});
     await saveScriptsByType(mergeRegexRules(existing,rules),SCRIPT_TYPES.GLOBAL);
 }
+async function migrateResourceBindings(oldNames){
+    const c=ctx();
+    for(const character of c.characters||[]){
+        if(!oldNames.includes(character.data?.extensions?.world))continue;
+        const response=await fetch('/api/characters/merge-attributes',{method:'POST',headers:c.getRequestHeaders(),body:JSON.stringify({avatar:character.avatar,data:{extensions:{world:WORLD_NAME}}})});
+        if(!response.ok)throw Error(`世界书绑定更新失败：HTTP ${response.status}`);
+        character.data.extensions.world=WORLD_NAME;
+    }
+    const characterWorld=document.getElementById('character_world');
+    if(characterWorld&&oldNames.includes(characterWorld.value))characterWorld.value=WORLD_NAME;
+    const previousChatWorld=c.chatMetadata?.world_info;
+    const chatChanged=migrateWorldBindings({selected:wi.selected_world_info,worldInfo:wi.world_info,powerUser:c.powerUserSettings,chatMetadata:c.chatMetadata},oldNames);
+    settings.world=WORLD_NAME;
+    settings.worldAliases={...settings.worldAliases,...Object.fromEntries(oldNames.map(name=>[name,WORLD_NAME]))};
+    if(chatChanged){
+        try{if(!c.saveMetadata)throw Error('酒馆不支持保存聊天世界书绑定');if(await c.saveMetadata()===false)throw Error('聊天世界书绑定保存失败');}
+        catch(error){c.chatMetadata.world_info=previousChatWorld;throw error;}
+    }
+    await persistSettings();
+}
+async function restoreResourceChatBinding(){
+    const c=ctx(),name=c.chatMetadata?.world_info,next=settings.worldAliases?.[name];
+    if(!next||next===name)return;
+    if(!c.saveMetadata)throw Error('酒馆不支持保存聊天世界书绑定');
+    c.chatMetadata.world_info=next;
+    try{if(await c.saveMetadata()===false)throw Error('聊天世界书绑定保存失败');}
+    catch(error){c.chatMetadata.world_info=name;throw error;}
+}
 async function installDefaults() {
     const [w,r]=await Promise.all([fetch(new URL('assets/worldbook.json',base),{cache:'no-store'}),fetch(new URL('assets/regex.json',base),{cache:'no-store'})]);
     if(!w.ok||!r.ok)throw new Error('内置资源读取失败');
@@ -363,9 +391,28 @@ async function installDefaults() {
     // Validate the entire pack before the first write.
     mergeWorldEntries({entries:{}},JSON.parse(world));mergeRegexRules([],rules);
     const targets=bundledWorldTargets(wi.world_names,settings.world);
-    for(const name of targets)await installWorld(new File([world],name+'.json',{type:'application/json'}),{targetName:name,activate:!wi.world_names.includes(name)});
-    settings.world=targets[0];
+    let existing={entries:{}};
+    for(const name of targets.filter(name=>wi.world_names.includes(name))){
+        const data=await wi.loadWorldInfo(name);if(!data)throw Error('无法读取原世界书，请重试');
+        existing=mergeWorldEntries(existing,data);
+    }
+    await installWorld(new File([world],WORLD_NAME+'.json',{type:'application/json'}),{targetName:WORLD_NAME,existing,activate:!targets.some(name=>wi.world_names.includes(name))});
     await installRegex(rules);
+    const oldNames=targets.filter(name=>name!==WORLD_NAME);
+    if(oldNames.length){
+        await migrateResourceBindings(oldNames);
+        for(const name of oldNames){
+            const response=await fetch('/api/worldinfo/delete',{method:'POST',headers:ctx().getRequestHeaders(),body:JSON.stringify({name})});
+            if(!response.ok)throw Error(`旧版世界书替换失败：HTTP ${response.status}`);
+            wi.worldInfoCache?.delete(name);
+        }
+        await wi.updateWorldInfoList();
+        if(oldNames.some(name=>wi.world_names.includes(name)))throw Error('世界书列表刷新失败');
+        const editor=document.getElementById('world_editor_select');
+        const option=editor&&[...editor.options].find(option=>option.text===WORLD_NAME);
+        if(option){editor.value=option.value;editor.dispatchEvent(new Event('change',{bubbles:true}));}
+    }
+    settings.world=WORLD_NAME;
     const previous={installed:settings.installed,resourceVersion:settings.resourceVersion};
     settings.installed=true;settings.resourceVersion=RESOURCE_VERSION;
     try{await persistSettings();}catch(error){Object.assign(settings,previous);throw error;}
@@ -545,6 +592,8 @@ function scheduleRender(automatic=false) {
 }
 async function init() {
     mountMenu();refreshFloating();const c=ctx();save();
+    await restoreResourceChatBinding();
+    if(c.eventTypes.CHAT_LOADED)c.eventSource.on(c.eventTypes.CHAT_LOADED,guard(restoreResourceChatBinding));
     let migrated=false;for(const message of c.chat)migrated=migrateSwipeImages(message)||migrated;if(migrated)await c.saveChat();
     document.addEventListener('click',event=>{
         if(event.target.closest?.('.miao-image-card>img,.miao-image-tools'))return;

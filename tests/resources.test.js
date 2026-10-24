@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {mergeWorldEntries,mergeRegexRules,bundledWorldTargets,WORLD_NAME} from '../resources.js';
+import {mergeWorldEntries,mergeRegexRules,bundledWorldTargets,migrateWorldBindings,WORLD_NAME} from '../resources.js';
 
 test('world updates replace matching titles, keep entry IDs, and retain unrelated user entries',()=>{
     const old={name:'user metadata',entries:{7:{uid:7,comment:'主体',content:'old',disable:true},3:{uid:3,comment:'用户追加',content:'keep'},9:{uid:9,comment:'主体',content:'duplicate'}}};
@@ -20,6 +20,20 @@ test('invalid world resources fail before merging and bundled world names retain
     assert.deepEqual(bundledWorldTargets(['其他书','[喵喵]文生图 2.0'],'其他书'),['[喵喵]文生图 2.0']);
     assert.deepEqual(bundledWorldTargets(['[喵喵]文生图 2.0',WORLD_NAME],WORLD_NAME),[WORLD_NAME,'[喵喵]文生图 2.0']);
     assert.deepEqual(bundledWorldTargets(['自定义 2.0','[喵喵]文生图 2.2'],''),[WORLD_NAME]);
+});
+
+test('world upgrade retargets global, character, persona and chat links without duplicate activation',()=>{
+    const old='[喵喵]文生图 2.0',selected=[old,'其他书',WORLD_NAME];
+    const worldInfo={globalSelect:[...selected],charLore:[{name:'a',extraBooks:[old,'其他书',WORLD_NAME]},{name:'b',extraBooks:['其他书']}]};
+    const powerUser={persona_description_lorebook:old,persona_descriptions:{a:{lorebook:old},b:{lorebook:'其他书'}}};
+    const chatMetadata={world_info:old,other:'keep'};
+    assert.equal(migrateWorldBindings({selected,worldInfo,powerUser,chatMetadata},[old]),true);
+    assert.deepEqual(selected,[WORLD_NAME,'其他书']);assert.deepEqual(worldInfo.globalSelect,selected);
+    assert.deepEqual(worldInfo.charLore[0].extraBooks,[WORLD_NAME,'其他书']);assert.deepEqual(worldInfo.charLore[1].extraBooks,['其他书']);
+    assert.equal(powerUser.persona_description_lorebook,WORLD_NAME);assert.equal(powerUser.persona_descriptions.a.lorebook,WORLD_NAME);assert.equal(powerUser.persona_descriptions.b.lorebook,'其他书');
+    assert.deepEqual(chatMetadata,{world_info:WORLD_NAME,other:'keep'});
+    assert.equal(migrateWorldBindings({selected,worldInfo,powerUser,chatMetadata},[old]),false);
+    const inactive=[];migrateWorldBindings({selected:inactive},[old]);assert.deepEqual(inactive,[]);
 });
 test('regex overwrites old dated copies even with changed IDs and removes duplicates',()=>{
     const old=[{id:'unrelated',scriptName:'用户规则',findRegex:'x',replaceString:'keep'},{id:'imported-id',scriptName:'喵喵文生图1-去标签-0820',findRegex:'old',replaceString:'old'},{id:'copy-id',scriptName:'喵喵文生图1-去标签-1024',findRegex:'copy',replaceString:'copy'},{id:'other',scriptName:'用户规则-0820',findRegex:'y',replaceString:'keep'}];

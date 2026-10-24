@@ -37,3 +37,15 @@ export function bundledWorldTargets(names,preferred){
     const primary=existing.includes(preferred)?preferred:existing.find(name=>/2\.0$/.test(name))||existing[0]||WORLD_NAME;
     return [primary,...existing.filter(name=>name!==primary)];
 }
+export function migrateWorldBindings({selected=[],worldInfo={},powerUser={},chatMetadata={}},oldNames,newName=WORLD_NAME){
+    const old=new Set(oldNames),replace=name=>old.has(name)?newName:name;
+    const remap=list=>[...new Set(list.map(replace))];
+    selected.splice(0,selected.length,...remap(selected));
+    worldInfo.globalSelect=[...selected];
+    for(const lore of worldInfo.charLore||[])if(Array.isArray(lore.extraBooks))lore.extraBooks=remap(lore.extraBooks);
+    if(old.has(powerUser.persona_description_lorebook))powerUser.persona_description_lorebook=newName;
+    for(const persona of Object.values(powerUser.persona_descriptions||{}))if(old.has(persona.lorebook))persona.lorebook=newName;
+    const chatChanged=old.has(chatMetadata.world_info);
+    if(chatChanged)chatMetadata.world_info=newName;
+    return chatChanged;
+}
