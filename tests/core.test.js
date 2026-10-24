@@ -38,7 +38,26 @@ test('custom capture protocol',()=>assert.equal(parseBlocks('<draw>cat</draw>','
 test('positive ordering, negative isolation and profile snapshot',()=>{
  const profile={...defaults,positive:'quality',artists:'artist',negative:'bad',seed:42};
  const r=buildRequest(profile,'scene'); profile.artists='changed';
- assert.equal(r.prompt,'quality,\nartist,\nscene');assert.equal(r.negative_prompt,'bad');assert.equal(r.seed,42);
+ assert.equal(r.prompt,'quality,\nartist,\nscene,');assert.equal(r.negative_prompt,'bad');assert.equal(r.seed,42);
+});
+
+test('prompt boundaries reuse existing commas and terminate the generated scene',()=>{
+ for(const [positive,scene,expected] of [
+  ['quality','scene','quality,\nscene,'],
+  ['quality,','scene','quality,\nscene,'],
+  ['quality,\n','scene,\n','quality,\nscene,'],
+  ['','scene','scene,'],
+  ['quality,','','quality,'],
+  ['','',''],
+  ['year 2025,\n1.5::original::,,','(girlA:1.2, source#glancing), indoor tension','year 2025,\n1.5::original::,,\n(girlA:1.2, source#glancing), indoor tension,'],
+ ]){
+  const profile={...defaults,positive,negative:'bad,',seed:42};
+  const before=structuredClone(profile);
+  const request=buildRequest(profile,scene);
+  assert.equal(request.prompt,expected);
+  assert.equal(request.negative_prompt,'bad,');
+  assert.deepEqual(profile,before);
+ }
 });
 test('invalid sizes and generation parameters rejected before charging',()=>{
  for(const patch of [{width:513},{height:0},{steps:51},{width:2048,height:2048},{seed:-2},{scale:NaN}])assert.throws(()=>buildRequest({...defaults,...patch},'cat'));
@@ -52,8 +71,8 @@ test('legacy artist fields merge exactly once into the matching profile',()=>{
 test('switching entire profiles keeps prompts, models and all parameters together',()=>{
  const profiles=[{...defaults,positive:'A',model:'nai-diffusion-4-5-full',width:512,height:768,steps:21,seed:1},{...defaults,positive:'B',model:'nai-diffusion-4-5-curated',width:832,height:1216,steps:28,seed:2}];
  const a=buildRequest(profiles[0],'scene');const b=buildRequest(profiles[1],'scene');
- assert.equal(a.prompt,'A,\nscene');assert.equal(a.steps,21);assert.equal(a.width,512);
- assert.equal(b.prompt,'B,\nscene');assert.equal(b.steps,28);assert.equal(b.width,832);assert.equal(b.model,'nai-diffusion-4-5-curated');
+ assert.equal(a.prompt,'A,\nscene,');assert.equal(a.steps,21);assert.equal(a.width,512);
+ assert.equal(b.prompt,'B,\nscene,');assert.equal(b.steps,28);assert.equal(b.width,832);assert.equal(b.model,'nai-diffusion-4-5-curated');
  assert.equal(buildRequest(profiles[0],'scene').steps,21);
 });
 test('history thumbnail urls encode folder names and reject unrelated files',()=>{
