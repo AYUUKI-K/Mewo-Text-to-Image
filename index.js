@@ -5,6 +5,7 @@ import { saveBase64AsFile } from '../../../utils.js';
 import * as hostUtils from '../../../utils.js';
 import {bindImageGesture,createFloatingEntry} from './interactions.js';
 import {persistHostSettings} from './settings-save.js';
+import {createPromptTranslator} from './translation.js';
 import { writeSecret, SECRET_KEYS } from '../../../secrets.js';
 import { getCurrentUserHandle } from '../../../user.js';
 import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
@@ -405,19 +406,20 @@ async function requestImage(request,task,canContinue) {
         onReleaseError:()=>toastr.info('队列连接中断，占用将自动到期释放')});
     return generate();
 }
-const translations=new Map();
+const translatePrompt=createPromptTranslator({getHeaders:()=>ctx().getRequestHeaders()});
 async function showPrompt(prompt,vibes=[]){
     const view=el('section',undefined,'miao-prompt-view');view.append(el('h3','绘图提示词'),el('pre',prompt));
     if(vibes.length)view.append(el('p','本张 Vibe：'+vibes.map(v=>v.name||v.id).join('、'),'miao-muted'));
     const button=el('button','Google 翻译为中文','miao-button');button.type='button';
-    const note=el('p','点击后通过酒馆的 Google 翻译接口发送这段提示词。译文仅供查看，不会改动生图内容。','miao-muted');
+    const note=el('p','','miao-muted');note.setAttribute('role','status');
+    const fallback=el('a','在 Google 翻译中打开');fallback.href='https://translate.google.com/?'+new URLSearchParams({sl:'auto',tl:'zh-CN',text:prompt,op:'translate'});fallback.target='_blank';fallback.rel='noopener noreferrer';fallback.hidden=true;
     const translated=el('pre');translated.hidden=true;translated.setAttribute('aria-live','polite');
-    button.onclick=guard(async()=>{button.disabled=true;button.textContent='翻译中…';try{
-        let result=translations.get(prompt);
-        if(!result){const response=await fetch('/api/translate/google',{method:'POST',headers:ctx().getRequestHeaders(),body:JSON.stringify({text:prompt,lang:'zh-CN'}),signal:AbortSignal.timeout(45000)});if(!response.ok)throw Error(`Google 翻译失败：HTTP ${response.status}，请检查酒馆服务器能否连接 Google。`);result=await response.text();if(!result.trim())throw Error('Google 未返回译文');if(translations.size>=50)translations.delete(translations.keys().next().value);translations.set(prompt,result);}
+    button.onclick=async()=>{if(button.disabled)return;button.disabled=true;button.textContent='翻译中…';note.textContent='';fallback.hidden=true;try{
+        const result=await translatePrompt(prompt,(index,total)=>{button.textContent=total>1?`翻译中 ${index}/${total}`:'翻译中…';});
         translated.textContent=result;translated.hidden=false;
-    }finally{button.disabled=false;button.textContent='Google 翻译为中文';}});
-    view.append(button,note,translated);await showPopup(view,POPUP_TYPE.TEXT,'',{wide:true,onOpen:popup=>popup.dlg.classList.add('miao-content-dialog')});
+    }catch(error){note.textContent=['TimeoutError','AbortError'].includes(error.name)?'翻译超时，请重试':error instanceof TypeError?'翻译连接失败，请重试':String(error.message||error);fallback.hidden=false;
+    }finally{button.disabled=false;button.textContent=note.textContent?'重试翻译':'Google 翻译为中文';}};
+    view.append(button,note,fallback,translated);await showPopup(view,POPUP_TYPE.TEXT,'',{wide:true,onOpen:popup=>popup.dlg.classList.add('miao-content-dialog')});
 }
 async function importVibeFile(file){
     if(file.size>18*1024*1024)throw Error('文件不能超过 18 MB');
