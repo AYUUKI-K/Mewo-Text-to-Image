@@ -63,6 +63,22 @@ test('invalid sizes and generation parameters rejected before charging',()=>{
  for(const patch of [{width:513},{height:0},{steps:51},{width:2048,height:2048},{seed:-2},{scale:NaN}])assert.throws(()=>buildRequest({...defaults,...patch},'cat'));
 });
 
+test('legacy positive stays in front, suffix is empty by default and each request snapshots all three parts',()=>{
+ const old={positive:'old style',artists:'artist',negative:'avoid',seed:42};
+ const migrated=normalizeProfile(old);
+ assert.equal(migrated.positive,'old style,\nartist');assert.equal(migrated.positiveSuffix,'');
+ assert.equal(migrated.vibeEnabled,true);
+ const profile={...migrated,positive:'front,',positiveSuffix:'back,'};
+ const request=buildRequest(profile,'scene');
+ profile.positive='changed front';profile.positiveSuffix='changed back';
+ assert.equal(request.prompt,'front,\nscene,\nback,');assert.equal(request.negative_prompt,'avoid');
+ assert.equal(buildRequest({...migrated,positive:'',positiveSuffix:'tail'},'').prompt,'tail,');
+ assert.equal(buildRequest({...migrated,positive:'front',positiveSuffix:'   '},'scene,').prompt,'front,\nscene,');
+ assert.equal(buildRequest({...migrated,positive:'front',positiveSuffix:'1.2::style::,',model:'nai-diffusion-5-full'},'scene').prompt,'front,\nscene,\n1.2::style::,');
+ assert.equal(buildRequest({...migrated,model:'nai-diffusion-5-curated'},'scene').model,'nai-diffusion-5-curated');
+ assert.equal('positiveSuffix' in old,false);
+});
+
 test('legacy artist fields merge exactly once into the matching profile',()=>{
  const a=normalizeProfile({...defaults,positive:'a quality',artists:'a artist',steps:21});
  assert.equal(a.positive,'a quality,\n'+'a artist');assert.equal(a.steps,21);assert.equal('artists' in a,false);

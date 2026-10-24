@@ -1,7 +1,9 @@
 // File schema and model encoding keys follow the official NovelAI image client.
 export const vibeModelKeys={'nai-diffusion-4-5-full':'v4-5full','nai-diffusion-4-5-curated':'v4-5curated','nai-diffusion-4-full':'v4full','nai-diffusion-4-curated-preview':'v4curated'};
+export const profileVibeEnabled=profile=>profile.vibeEnabled!==false&&(!profile.model||!!vibeModelKeys[profile.model]);
 // Resolve once before queueing. Each image keeps its own independent selection.
 export function selectVibes(profile,library=[],random=Math.random){
+    if(!profileVibeEnabled(profile))return [];
     const bindings=profile.vibes??[];
     if(!Array.isArray(bindings))throw Error('Vibe 列表格式错误');
     const mode=profile.vibeMode??'multiple';

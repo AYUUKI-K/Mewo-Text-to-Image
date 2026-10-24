@@ -40,3 +40,19 @@ test('empty pools produce ordinary images and invalid modes fail explicitly',()=
     assert.deepEqual(selectVibes({vibes:[]}),[]);
     assert.throws(()=>selectVibes({vibeMode:'invalid',vibes}),/方式/);
 });
+
+test('master toggle bypasses references and limits without clearing the selected pool or consuming a draw',()=>{
+ const profile={model:'nai-diffusion-4-5-full',vibeEnabled:false,vibeMode:'multiple',vibes:structuredClone(vibes)};
+ const saved=JSON.stringify(profile.vibes);
+ assert.deepEqual(selectVibes(profile,library,()=>{throw Error('must not draw');}),[]);
+ assert.equal(JSON.stringify(profile.vibes),saved);
+ profile.vibeMode='random';profile.vibeEnabled=true;
+ assert.equal(selectVibes(profile,library,()=>0.99)[0].id,'v11');
+ assert.equal(JSON.stringify(profile.vibes),saved);
+ for(const model of ['nai-diffusion-5-full','nai-diffusion-5-curated']){
+  profile.model=model;assert.deepEqual(selectVibes(profile,library),[]);assert.equal(profile.vibeEnabled,true);
+ }
+ profile.model='nai-diffusion-4-5-full';assert.equal(selectVibes(profile,library,()=>0)[0].id,'v0');
+ const reloaded=normalizeProfile(JSON.parse(JSON.stringify({...profile,vibeEnabled:false})));
+ assert.equal(reloaded.vibeEnabled,false);assert.deepEqual(reloaded.vibes,profile.vibes);
+});

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createDirectClient} from '../direct-client.js';
+import {createDirectClient,naiPayload} from '../direct-client.js';
+import {buildRequest,defaults} from '../core.js';
 import {createKeyVault} from '../direct-key.js';
 
 test('frontend-only Vibe uses existing ST file API and sends key only to NovelAI',async()=>{
@@ -33,6 +34,16 @@ test('direct Key stays in page memory by default and can be cleared without serv
  const vault=createKeyVault('user-a',{indexedDBImpl:null});await vault.set('page-only-key',false);assert.equal(await vault.get(),'page-only-key');await vault.clear();assert.equal(await vault.get(),'');
  await assert.rejects(vault.set('key',true),/浏览器/);
  const other=createKeyVault('user-b',{indexedDBImpl:null});assert.equal(await other.get(),'');
+});
+
+test('V5 Full and Curated preserve model IDs and ordered positive parts in the direct payload',()=>{
+ for(const model of ['nai-diffusion-5-full','nai-diffusion-5-curated']){
+  const request=buildRequest({...defaults,model,positive:'front',positiveSuffix:'back'},'scene');
+  const payload=naiPayload(request);
+  assert.equal(payload.model,model);assert.equal(payload.input,'front,\nscene,\nback,');
+  assert.equal(payload.parameters.v4_prompt.caption.base_caption,payload.input);
+  assert.equal(payload.parameters.v4_negative_prompt.caption.base_caption,defaults.negative);
+ }
 });
 test('uncertain direct network failures retain TypeError so queue lease is not released early',async()=>{
  const settings={vibeLibrary:[]};const client=createDirectClient({settings,save(){},getHeaders:()=>({}),getKey:async()=>'test-key',unzipPNG:async()=>'',fetchImpl:async()=>{throw new TypeError('network');}});

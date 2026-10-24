@@ -16,7 +16,7 @@ import { createSettingsPanel } from './ui.js';
 import {createDirectClient} from './direct-client.js';
 import {createKeyVault,saveCurrentKey} from './direct-key.js';
 import {appendImageVersion,imageVersions,selectImageVersion} from './image-history.js';
-import {selectVibes} from './vibe.js';
+import {selectVibes,profileVibeEnabled} from './vibe.js';
 import {createExtensionUpdater} from './updates.js';
 import {downloadImageSelection} from './downloads.js';
 import {migrateSwipeImages,readSwipeImage,writeSwipeImage,swipeImageRecords,removeSwipeImages} from './swipe-history.js';
@@ -205,7 +205,7 @@ function makeCard(message,block) {
         button('提示词',()=>showPrompt(current.request?.prompt||block.prompt,current.request?.vibes,current.profileName),operations).setAttribute('aria-label','查看提示词');
         button('下载',()=>downloadImage(current.url),operations).setAttribute('aria-label','下载图片');button('放大',()=>openImage(current.url),operations).setAttribute('aria-label','放大查看');
     }else if(!task){
-        actions.hidden=false;button(task?.status||'生成插图',()=>generate(message,block)).disabled=!!task;button('查看提示词',()=>{const profile=settings.profiles[settings.active];return showPrompt(block.prompt,(profile.vibes||[]).map(v=>({...v,name:settings.vibeLibrary?.find(item=>item.id===v.id)?.name||v.name||v.id})),profile.name,true);});
+        actions.hidden=false;button(task?.status||'生成插图',()=>generate(message,block)).disabled=!!task;button('查看提示词',()=>{const profile=settings.profiles[settings.active],enabled=profileVibeEnabled(profile);return showPrompt(block.prompt,enabled?(profile.vibes||[]).map(v=>({...v,name:settings.vibeLibrary?.find(item=>item.id===v.id)?.name||v.name||v.id})):[],profile.name,true,enabled);});
     }
     if(task){const progress=el('span',task.status,'miao-image-progress');progress.setAttribute('role','status');card.append(progress);}
     card.dataset.status=String(selected)+':'+versions.map(v=>v.url+':'+!!v.deleted).join('|')+':'+(task?.status||'')+':'+(settings.rerollClicks===3?3:2);
@@ -474,9 +474,9 @@ async function requestImage(request,task,canContinue) {
     return generate();
 }
 const translatePrompt=createPromptTranslator({getHeaders:()=>ctx().getRequestHeaders()});
-async function showPrompt(prompt,vibes=[],profileName='',pending=false){
+async function showPrompt(prompt,vibes=[],profileName='',pending=false,vibeEnabled=true){
     const view=el('section',undefined,'miao-prompt-view');view.append(el('h3','绘图提示词'),el('pre',prompt));
-    const metadata=el('div',undefined,'miao-prompt-metadata');metadata.append(el('span',(pending?'当前配置：':'配置：')+(profileName||'未记录')),el('span',(pending?'Vibe 候选：':'Vibe：')+(vibes.length?vibes.map(v=>v.name||v.id).join('、'):pending?'未选择':'未使用')));view.append(metadata);
+    const metadata=el('div',undefined,'miao-prompt-metadata');metadata.append(el('span',(pending?'当前配置：':'配置：')+(profileName||'未记录')),el('span',(pending?'Vibe 候选：':'Vibe：')+(pending&&!vibeEnabled?'已关闭':vibes.length?vibes.map(v=>v.name||v.id).join('、'):pending?'未选择':'未使用')));view.append(metadata);
     const actions=el('div',undefined,'miao-translation-actions'),buttons=new Map();
     const providers=[['google','Google 翻译'],['bing','Microsoft 翻译']];
     for(const [provider,label] of providers){const button=el('button',label,'miao-button');button.type='button';button.dataset.translationProvider=provider;button.onclick=()=>runTranslation(provider);buttons.set(provider,button);actions.append(button);}
